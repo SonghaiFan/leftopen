@@ -93,7 +93,7 @@ struct MenuPanel: View {
                 .disabled(model.isClosing)
             }
             DoorMark()
-            .frame(width: 22, height: 28)
+                .frame(width: 18, height: 30)
                 .accessibilityHidden(true)
             if model.pendingPlan != nil || model.selectedActivityID != nil || selectedProcessPID != nil {
                 Text("LeftOpen").font(.headline)
@@ -565,50 +565,103 @@ private struct ScopeLabel: View {
 }
 
 private struct DoorMark: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         GeometryReader { proxy in
             let w = proxy.size.width
             let h = proxy.size.height
+            let sx = w / 33.0
+            let sy = h / 55.0
+
+            let darkColor = colorScheme == .dark ? Color.white : Color(red: 0x21 / 255.0, green: 0x18 / 255.0, blue: 0x11 / 255.0)
+            let leafColor = colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color.white
+
             ZStack {
-                Path { path in
-                    path.move(to: CGPoint(x: 0, y: h))
-                    path.addLine(to: CGPoint(x: 0, y: h * (43.0 / 148.0)))
-                    path.addArc(
-                        center: CGPoint(x: w * 0.5, y: h * (43.0 / 148.0)),
-                        radius: w * 0.5,
-                        startAngle: .degrees(180),
-                        endAngle: .degrees(0),
-                        clockwise: false
+                // Layer 1: door-back (interior opening)
+                Path { p in
+                    p.move(to: CGPoint(x: 0.74 * sx, y: 54.51 * sy))
+                    p.addLine(to: CGPoint(x: 0.74 * sx, y: 16.161 * sy))
+                    p.addCurve(
+                        to: CGPoint(x: 16.28 * sx, y: 0.707 * sy),
+                        control1: CGPoint(x: 0.74 * sx, y: 7.683 * sy),
+                        control2: CGPoint(x: 7.755 * sx, y: 0.707 * sy)
                     )
-                    path.addLine(to: CGPoint(x: w, y: h))
-                    path.closeSubpath()
+                    p.addCurve(
+                        to: CGPoint(x: 31.82 * sx, y: 16.161 * sy),
+                        control1: CGPoint(x: 24.805 * sx, y: 0.707 * sy),
+                        control2: CGPoint(x: 31.82 * sx, y: 7.683 * sy)
+                    )
+                    p.addLine(to: CGPoint(x: 31.82 * sx, y: 54.51 * sy))
+                    p.closeSubpath()
                 }
-                .fill(Color(nsColor: .labelColor))
+                .fill(darkColor)
 
-                Path { path in
-                    path.move(to: CGPoint(x: w * (26.0 / 86.0), y: h * (132.0 / 148.0)))
-                    path.addLine(to: CGPoint(x: w * (26.0 / 86.0), y: h * (47.0 / 148.0)))
-                    path.addCurve(
-                        to: CGPoint(x: w * (67.0 / 86.0), y: h * (14.0 / 148.0)),
-                        control1: CGPoint(x: w * (26.0 / 86.0), y: h * (28.0 / 148.0)),
-                        control2: CGPoint(x: w * (47.0 / 86.0), y: h * (14.0 / 148.0))
+                // Layer 2: door leaf
+                Path { p in
+                    p.move(to: CGPoint(x: 9.9 * sx, y: 49.177 * sy))
+                    p.addLine(to: CGPoint(x: 9.9 * sx, y: 18.124 * sy))
+                    p.addCurve(
+                        to: CGPoint(x: 27.417 * sx, y: 5.505 * sy),
+                        control1: CGPoint(x: 9.9 * sx, y: 10.845 * sy),
+                        control2: CGPoint(x: 19.563 * sx, y: 4.007 * sy)
                     )
-                    path.addCurve(
-                        to: CGPoint(x: w * (83.0 / 86.0), y: h * (39.0 / 148.0)),
-                        control1: CGPoint(x: w * (76.0 / 86.0), y: h * (14.0 / 148.0)),
-                        control2: CGPoint(x: w * (83.0 / 86.0), y: h * (27.0 / 148.0))
+                    p.addCurve(
+                        to: CGPoint(x: 31.647 * sx, y: 18.981 * sy),
+                        control1: CGPoint(x: 31.965 * sx, y: 9.711 * sy),
+                        control2: CGPoint(x: 31.647 * sx, y: 11.702 * sy)
                     )
-                    path.addLine(to: CGPoint(x: w * (83.0 / 86.0), y: h * (143.0 / 148.0)))
-                    path.closeSubpath()
+                    p.addLine(to: CGPoint(x: 31.647 * sx, y: 53.609 * sy))
+                    p.closeSubpath()
                 }
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(leafColor)
 
-                Circle()
-                    .fill(Color(nsColor: .labelColor))
-                    .frame(width: max(2, w * (7.6 / 86.0)), height: max(2, w * (7.6 / 86.0)))
-                    .position(x: w * (35.5 / 86.0), y: h * (78.0 / 148.0))
+                // Layer 3: door-knob
+                Path { p in
+                    p.addEllipse(in: CGRect(
+                        x: (13.552 - 1.644) * sx,
+                        y: (29.134 - 1.644) * sy,
+                        width: 2 * 1.644 * sx,
+                        height: 2 * 1.644 * sy
+                    ))
+                }
+                .fill(darkColor)
+
+                // Layer 4: door-outline
+                Path { p in
+                    p.move(to: CGPoint(x: 0.391 * sx, y: 16.155 * sy))
+                    p.addCurve(
+                        to: CGPoint(x: 16.383 * sx, y: 0.248 * sy),
+                        control1: CGPoint(x: 0.391 * sx, y: 7.43 * sy),
+                        control2: CGPoint(x: 7.609 * sx, y: 0.248 * sy)
+                    )
+                    p.addCurve(
+                        to: CGPoint(x: 32.375 * sx, y: 16.155 * sy),
+                        control1: CGPoint(x: 25.157 * sx, y: 0.248 * sy),
+                        control2: CGPoint(x: 32.375 * sx, y: 7.43 * sy)
+                    )
+                    p.addLine(to: CGPoint(x: 32.375 * sx, y: 54.805 * sy))
+                    p.addLine(to: CGPoint(x: 0.391 * sx, y: 54.805 * sy))
+                    p.closeSubpath()
+
+                    p.move(to: CGPoint(x: 1.501 * sx, y: 53.695 * sy))
+                    p.addLine(to: CGPoint(x: 31.264 * sx, y: 53.695 * sy))
+                    p.addLine(to: CGPoint(x: 31.264 * sx, y: 16.155 * sy))
+                    p.addCurve(
+                        to: CGPoint(x: 16.382 * sx, y: 1.358 * sy),
+                        control1: CGPoint(x: 31.264 * sx, y: 8.037 * sy),
+                        control2: CGPoint(x: 24.545 * sx, y: 1.358 * sy)
+                    )
+                    p.addCurve(
+                        to: CGPoint(x: 1.501 * sx, y: 16.155 * sy),
+                        control1: CGPoint(x: 8.219 * sx, y: 1.358 * sy),
+                        control2: CGPoint(x: 1.501 * sx, y: 8.037 * sy)
+                    )
+                    p.closeSubpath()
+                }
+                .fill(darkColor, style: FillStyle(eoFill: true))
             }
         }
-        .aspectRatio(86.0 / 148.0, contentMode: .fit)
+        .aspectRatio(33.0 / 55.0, contentMode: .fit)
     }
 }
