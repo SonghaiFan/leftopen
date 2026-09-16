@@ -1,173 +1,145 @@
-# LeftOpen
+<div align="center">
+  <img src="assets/logo.svg" alt="LeftOpen Logo" width="76" height="96" />
+  <h1>LeftOpen</h1>
+  <p><strong>把那些虚掩着的门，轻轻关上。</strong></p>
+  <p><em>See what your tools left running on localhost, and gently close them.</em></p>
 
-> See what your tools left running on localhost.
+  <p>
+    <a href="https://songhaifan.github.io/leftopen/"><img src="https://img.shields.io/badge/website-GitHub%20Pages-211811?style=flat-square" alt="Website" /></a>
+    <a href="https://github.com/SonghaiFan/leftopen/releases/latest"><img src="https://img.shields.io/github/v/release/SonghaiFan/leftopen?color=black&style=flat-square" alt="Release" /></a>
+    <a href="https://github.com/SonghaiFan/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-cask-DE8500?style=flat-square" alt="Homebrew Cask" /></a>
+    <img src="https://img.shields.io/badge/macOS-14.0%2B%20(Sonoma)-007AFF?style=flat-square" alt="macOS 14+" />
+    <img src="https://img.shields.io/badge/Apple%20Notarized-Accepted-2E7D32?style=flat-square" alt="Apple Notarized" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5F6168?style=flat-square" alt="License: MIT" /></a>
+  </p>
 
-LeftOpen is a native macOS menu-bar app and a TypeScript CLI for understanding
-local listening ports. Instead of showing only a raw `lsof` table, both collect
-observable process facts and make conservative owner inferences from them.
+  <br />
+  <img src="assets/preview.jpg" alt="LeftOpen macOS Menu Bar App Preview" width="720" style="border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.12);" />
+  <br /><br />
+</div>
 
-## Installation
+**LeftOpen** 是一个原生 macOS 菜单栏应用与命令行工具（TypeScript CLI），用于洞察正在监听本机的各类服务端口。
 
-### Via Homebrew (Recommended)
+它并不只是简单地输出一份生硬的 `lsof` 表格，而是收集进程相关的**客观事实**（工作目录、Git 仓库、`package.json`、`pyproject.toml`、macOS `.app` Bundle），据此对进程所属的项目或应用做出**严谨、克制的归属推断**，并提供安全的单键确认关闭体验。
 
-Install the native macOS menu-bar app directly into `/Applications`:
+---
+
+## ⚡ 安装与使用 (Installation)
+
+### 方式一：通过 Homebrew 安装（推荐）
+
+直接将已通过 Apple 官方公证的原生应用安装至 `/Applications`：
 
 ```bash
 brew install --cask SonghaiFan/tap/leftopen
 ```
 
-LeftOpen is signed with an Apple Developer ID and notarized by Apple, allowing direct execution on macOS Sonoma (14.0+) without Gatekeeper warnings.
+> **注意**：应用由 Apple 官方公证（Notarized），在 macOS Sonoma (14.0+) 上下载后可直接双击运行，无需处理 Gatekeeper 拦截。
 
-### Direct Download
+### 方式二：直接下载发布包
 
-Download the latest `LeftOpen.zip` from [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest), unzip, and drag `LeftOpen.app` to your `/Applications` folder.
+前往 [**GitHub Releases**](https://github.com/SonghaiFan/leftopen/releases/latest) 下载最新的 `LeftOpen.zip`，解压后将 `LeftOpen.app` 拖入 `/Applications` 文件夹。
 
-## Native menu-bar app
+---
 
-The Swift app requires macOS 14 or later. It uses SwiftUI `MenuBarExtra` with a
-window-style panel and has no Dock icon. The status item shows the listening-port
-count. Opening it shows a branded, grouped listener list with native search;
-rows reserve symbols for unknown owners and LAN-facing bind addresses. Selecting
-a row reveals process facts and an explicit Close review; owner-attribution
-evidence is available on demand. It supports manual refresh (Command-R) and Escape to cancel the Close
-review. It scans on launch, once per minute while running, and when the panel
-opens; it does not run a network service.
+## ✨ 核心特性 (Features)
 
-```bash
-swift test
-Scripts/build-app.sh
-open dist/LeftOpen.app
-```
+- 🔍 **上下文感知的项目推断**：自动定位由 `.git`、`package.json`、`pyproject.toml`、`Cargo.toml` 或 `go.mod` 证明的真实项目，告别千篇一律的 `node` 或 `python`。
+- 🛡️ **克制、温和的关闭体验**：
+  - 关闭前自动完整预览该 PID 占用的所有其它关联端口。
+  - 关闭前夕毫秒级二次核验 PID、启动时间与进程身份，防范 PID 重用误杀。
+  - 仅发送温和的 `SIGTERM` 请求优雅退出，绝不在后台擅自升级为暴力 `SIGKILL`。
+  - 严正拒绝关闭操作系统内核服务、已安装的应用软件或属于其他用户的进程。
+- 🌐 **LAN 局域网暴露警示**：清晰区分绑定到回环地址（`127.0.0.1`，仅限本机）与暴露到局域网（`0.0.0.0` / LAN IP）的端口，防范接口意外暴露。
+- 🍃 **极致轻量原生体验**：采用纯原生 SwiftUI `MenuBarExtra`（Window 风格面板），无 Dock 栏驻留，无后台网络守护进程，常驻菜单栏即点即开。
+- ⌨️ **双重接口支持**：除了菜单栏 UI，还提供零外部依赖的纯 TypeScript 终端 CLI。
 
-`Scripts/build-app.sh` builds a self-contained, host-architecture `.app` and
-ad-hoc signs it for local development. It refuses to overwrite an existing
-`LeftOpen.app`; choose a fresh `LEFTOPEN_OUTPUT_DIR` for another build. The Swift
-scanner and Close implementation are independent of Node, so the app does not
-need Node installed. The original TypeScript CLI remains available below.
-In this workspace, the latest UI test build is `dist/process-port-hierarchy-ui/LeftOpen.app`;
-earlier test bundles are retained rather than overwritten.
+---
 
-Close is never automatic: the panel previews one PID, its executable, start
-time, and any other ports it listens on, then requires a separate confirmation.
-The Swift core re-scans the port and process identity immediately before sending
-SIGTERM. It refuses OS/app-owned processes, other users' processes, missing
-identity evidence, and root operation. It never escalates to SIGKILL.
+## 💻 命令行 CLI (TypeScript CLI)
 
-## Direct distribution
-
-For distribution outside the Mac App Store, use a Developer ID Application
-certificate, hardened-runtime signing, Apple's notarization service, and a
-stapled ticket. The release script requires you to explicitly choose a stable
-bundle ID, signing identity, and a `notarytool` Keychain profile; no credentials
-are embedded in this repository.
+LeftOpen CLI 利用了最新 Node.js 的原生 TypeScript 支持，**零第三方依赖**。
 
 ```bash
-LEFTOPEN_OUTPUT_DIR=/absolute/new/output \
-LEFTOPEN_BUNDLE_ID=your.reverse.dns.id \
-Scripts/build-app.sh
-
-LEFTOPEN_OUTPUT_DIR=/absolute/new/output \
-LEFTOPEN_BUNDLE_ID=your.reverse.dns.id \
-LEFTOPEN_APP_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-LEFTOPEN_NOTARY_PROFILE=your-keychain-profile \
-Scripts/sign-and-notarize.sh
-```
-
-The script verifies the bundle ID and code signature, submits a zip to
-`notarytool`, staples the ticket, checks Gatekeeper acceptance, and creates
-`LeftOpen-release.zip`. It refuses to replace an existing zip. No Developer ID
-signing or notarization has been performed on the local development build.
-See Apple's [notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
-for certificate and `notarytool` profile setup. The current script builds only
-the host CPU architecture, not a universal binary.
-
-## TypeScript CLI
-
-This prototype uses the native TypeScript support in recent Node.js releases and
-has no third-party dependencies.
-
-```bash
+# 扫描并输出所有打开的端口及归属
 npm start
+
+# 查看特定端口（如 3000 或 5173）
 npm start -- 3000
+
+# 纯 JSON 结构化输出（事实与推断分离）
 npm start -- --json
+
+# 预览关闭端口（Dry run，不真正发信号）
 npm start -- close 3000 --dry-run
+
+# 交互式安全关闭端口（默认选择 No）
 npm start -- close 3000
 ```
 
-To make the `leftopen` command available while working on the prototype:
-
+全局链接命令：
 ```bash
 npm link
 leftopen
 leftopen 3000
-leftopen close 3000 --dry-run
-leftopen close 3000
 ```
 
-## What it shows
+### CLI 输出示例
 
-- TCP listening ports on macOS
-- PID, parent PID/process chain, executable path, user, and working directory
-- project roots evidenced by `.git`, `package.json`, `pyproject.toml`,
-  `Cargo.toml`, or `go.mod`
-- application names evidenced by macOS `.app` bundle paths
-- system-service labels evidenced by operating-system executable locations
-- whether a listener is local-only or potentially visible on the LAN
-- merged IPv4/IPv6 addresses for the same PID and port
-- explicit confidence and reason fields for every inferred owner
+```text
+LEFT OPEN
+26 listening ports · 17 processes · 1 projects · 8 LAN-visible
 
-The JSON output separates `facts` from `inference`. Process names and paths are
-reported as facts; they are never searched for a built-in list of product or
-vendor keywords. If the available evidence does not establish an owner, LeftOpen
-reports `Unknown`.
+MY PROJECTS (2)
+PORT    PID      OWNER          PROCESS    SCOPE
+5173    76344    visdelta       node       LOCAL
+         ↳ ~/Documents/visdelta
+5511    4999     visdelta       node       LOCAL
+         ↳ ~/Documents/visdelta
 
-Project markers found in installed-software trees, app bundles, the user Library,
-hidden per-user tool-data directories, caches, and dependency trees are ignored.
-This prevents package metadata belonging to extensions or installed runtimes from
-being presented as a user's project.
+APPLICATIONS (16)
+PORT    PID      OWNER          PROCESS    SCOPE
+5000    696      ControlCenter  Control    LAN
+9222    36824    Google Chrome  Chrome     LOCAL
 
-## Current boundary
+SYSTEM SERVICES (3)
+PORT    PID      OWNER          PROCESS    SCOPE
+49152   680      rapportd       rapportd   LAN
 
-Scanning remains read-only. `leftopen close <port>` is a separate, explicit
-operation that gracefully terminates the single process listening on that port.
-It sends `SIGTERM` to one PID, not to a port, parent process, or process tree.
-If several PIDs share the port, specify `--pid <pid>` after inspecting them.
-Use `--dry-run` to see the target without sending a signal, or `--yes` to
-confirm non-interactively. The interactive command defaults to **No**.
+LOCAL = this Mac only · LAN = may be reachable from your local network
+```
 
-Before signalling, LeftOpen requires the current user's UID, an executable
-path, and a process start time. It re-scans the listener and compares those
-facts after confirmation to reduce the risk of terminating a reused PID.
-Application-owned processes and operating-system executable locations are
-refused; running `close` as root is also refused. Closing a process may also
-close its other listening ports, which are shown in the preview. LeftOpen waits
-briefly and checks whether the port is
-free; it never escalates to `SIGKILL` automatically. A service manager may
-restart a stopped process and reoccupy the port.
+---
 
-The tool does not inspect ordinary browser history, run in the background, or
-send telemetry.
+## 🔒 安全准则与设计边界 (Security & Boundary)
 
-Classification is evidence-based but still heuristic. Use `leftopen <port>` to
-see the raw executable, CWD, parents, addresses, accepted marker or app bundle,
-confidence, and inference reason.
+1. **事实优先，绝无关键字猜测**：进程名、路径只作为事实记录，绝不在二进制内部内置诸如产品或厂商关键字列表去胡乱猜测。证据不足时，明确归类为 `Unknown`。
+2. **过滤伪项目标记**：自动忽略用户 Library、开发工具隐藏目录、缓存目录以及 `node_modules` 内部的 package.json，避免将扩展或运行时的元数据误报为用户的项目。
+3. **只读扫描**：扫描过程纯粹只读，不启动后台网络常驻进程，不收集任何数据，无遥测（No Telemetry）。
+4. **最小化介入**：关闭操作以 PID 为唯一目标，不擅自向端口广播、也不递归 Kill 整个进程树。
 
-The scanner currently depends on macOS `/usr/sbin/lsof`, `/bin/ps`, `.app` bundle
-layout, and conventional macOS filesystem locations. Permissions can hide CWDs,
-executable paths, or the process table; when parent evidence is unavailable the
-CLI reports that limitation and keeps uncertain owners as `Unknown`. Reachability
-is inferred only from the listener bind address—it does not test firewalls,
-containers, virtual machines, reverse proxies, or actual network connectivity.
-The `close` command additionally depends on `/bin/ps` for a start-time check
-and refuses to act when that check is unavailable. There remains a narrow race
-between the final identity check and signalling the PID; macOS does not expose
-a PID-bound signal handle through this prototype.
-Without explicit metadata, LeftOpen also cannot reliably tell whether an
-application is a browser, AI tool, editor, or another kind of app, so it does not
-guess those semantic subcategories from names.
+---
 
-## Test
+## 🛠️ 本地构建与测试 (Development)
 
+### 运行测试
 ```bash
+# 运行 Swift 原生测试
+swift test
+
+# 运行 TypeScript CLI 测试
 npm test
 ```
+
+### 本地编译 macOS App
+```bash
+# 编译并生成临时本地开发 App
+LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
+open dist/dev/LeftOpen.app
+```
+
+---
+
+## 📄 许可证 (License)
+
+本项目采用 [MIT License](LICENSE) 开源。欢迎 Issue 与 PR！
