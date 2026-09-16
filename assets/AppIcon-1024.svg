@@ -9,15 +9,8 @@
     </filter>
   </defs>
 
-  <!-- macOS App Squircle Tile (Standard 824x824 rounded rect centered at 512,512) -->
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#macBg)" stroke="#E5E3DF" stroke-width="2" filter="url(#subtleShadow)" />
-
-  <!-- Layer 1: Outer Door Frame & Dark Interior Shadow -->
-  <path d="M 299.79 872.0 L 299.79 364.21 A 212.21 204.63 0 0 1 724.21 364.21 L 724.21 872.0 Z" fill="#211811" />
-
-  <!-- Layer 2: Open Door Leaf / Bright Interior -->
-  <path d="M 432.42 781.05 L 432.42 349.05 C 432.42 265.68 519.58 216.42 618.11 216.42 C 663.58 216.42 701.47 265.68 701.47 318.74 L 701.47 849.26 Z" fill="#FFFFFF" />
-
-  <!-- Layer 3: Doorknob -->
-  <circle cx="470.32" cy="519.58" r="16.67" fill="#211811" />
+  <path d="M 302.81 872.0 L 302.81 361.19 A 209.19 209.19 0 0 1 721.19 361.19 L 721.19 872.0 Z" fill="#211811" />
+  <path d="M 429.3 794.16 L 429.3 380.65 C 429.3 288.22 531.46 220.11 628.76 220.11 C 672.54 220.11 706.59 283.35 706.59 341.73 L 706.59 847.68 Z" fill="#FFFFFF" />
+  <circle cx="475.51" cy="531.46" r="18.49" fill="#211811" />
 </svg>

@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 95" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 86 148" fill="none">
   <!-- Outer Arch Frame & Deep Shadow -->
-  <path d="M 0 95 L 0 28 A 28 27 0 0 1 56 28 L 56 95 Z" fill="#211811"/>
+  <path d="M 0 148 L 0 43 A 43 43 0 0 1 86 43 L 86 148 Z" fill="#211811"/>
   <!-- Open Door Leaf / Light -->
-  <path d="M 17.5 83 L 17.5 26 C 17.5 15 29 8.5 42 8.5 C 48 8.5 53 15 53 22 L 53 92 Z" fill="#FFFFFF"/>
+  <path d="M 26 132 L 26 47 C 26 28 47 14 67 14 C 76 14 83 27 83 39 L 83 143 Z" fill="#FFFFFF"/>
   <!-- Doorknob -->
-  <circle cx="22.5" cy="48.5" r="2.2" fill="#211811"/>
+  <circle cx="35.5" cy="78.0" r="3.8" fill="#211811"/>
 </svg>

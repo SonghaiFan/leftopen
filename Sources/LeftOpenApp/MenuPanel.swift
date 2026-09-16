@@ -567,41 +567,48 @@ private struct ScopeLabel: View {
 private struct DoorMark: View {
     var body: some View {
         GeometryReader { proxy in
-            let width = proxy.size.width
-            let height = proxy.size.height
+            let w = proxy.size.width
+            let h = proxy.size.height
             ZStack {
                 Path { path in
-                    path.move(to: CGPoint(x: width * 0.08, y: height))
-                    path.addLine(to: CGPoint(x: width * 0.08, y: height * 0.30))
-                    path.addCurve(
-                        to: CGPoint(x: width * 0.92, y: height * 0.38),
-                        control1: CGPoint(x: width * 0.08, y: 0),
-                        control2: CGPoint(x: width * 0.92, y: 0)
+                    path.move(to: CGPoint(x: 0, y: h))
+                    path.addLine(to: CGPoint(x: 0, y: h * (43.0 / 148.0)))
+                    path.addArc(
+                        center: CGPoint(x: w * 0.5, y: h * (43.0 / 148.0)),
+                        radius: w * 0.5,
+                        startAngle: .degrees(180),
+                        endAngle: .degrees(0),
+                        clockwise: false
                     )
-                    path.addLine(to: CGPoint(x: width * 0.92, y: height))
+                    path.addLine(to: CGPoint(x: w, y: h))
                     path.closeSubpath()
                 }
                 .fill(Color(nsColor: .labelColor))
 
                 Path { path in
-                    path.move(to: CGPoint(x: width * 0.31, y: height * 0.82))
-                    path.addLine(to: CGPoint(x: width * 0.31, y: height * 0.34))
+                    path.move(to: CGPoint(x: w * (26.0 / 86.0), y: h * (132.0 / 148.0)))
+                    path.addLine(to: CGPoint(x: w * (26.0 / 86.0), y: h * (47.0 / 148.0)))
                     path.addCurve(
-                        to: CGPoint(x: width * 0.69, y: height * 0.39),
-                        control1: CGPoint(x: width * 0.31, y: height * 0.17),
-                        control2: CGPoint(x: width * 0.69, y: height * 0.17)
+                        to: CGPoint(x: w * (67.0 / 86.0), y: h * (14.0 / 148.0)),
+                        control1: CGPoint(x: w * (26.0 / 86.0), y: h * (28.0 / 148.0)),
+                        control2: CGPoint(x: w * (47.0 / 86.0), y: h * (14.0 / 148.0))
                     )
-                    path.addLine(to: CGPoint(x: width * 0.69, y: height * 0.77))
+                    path.addCurve(
+                        to: CGPoint(x: w * (83.0 / 86.0), y: h * (39.0 / 148.0)),
+                        control1: CGPoint(x: w * (76.0 / 86.0), y: h * (14.0 / 148.0)),
+                        control2: CGPoint(x: w * (83.0 / 86.0), y: h * (27.0 / 148.0))
+                    )
+                    path.addLine(to: CGPoint(x: w * (83.0 / 86.0), y: h * (143.0 / 148.0)))
                     path.closeSubpath()
                 }
                 .fill(Color(nsColor: .windowBackgroundColor))
 
                 Circle()
                     .fill(Color(nsColor: .labelColor))
-                    .frame(width: max(2, width * 0.09), height: max(2, width * 0.09))
-                    .position(x: width * 0.42, y: height * 0.54)
+                    .frame(width: max(2, w * (7.6 / 86.0)), height: max(2, w * (7.6 / 86.0)))
+                    .position(x: w * (35.5 / 86.0), y: h * (78.0 / 148.0))
             }
         }
-        .aspectRatio(0.72, contentMode: .fit)
+        .aspectRatio(86.0 / 148.0, contentMode: .fit)
     }
 }
