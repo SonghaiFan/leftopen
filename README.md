@@ -18,6 +18,31 @@
   <br /><br />
 </div>
 
+> 当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。
+> 
+> 问题是：现有工具要么太复杂，要么只能告诉你“端口被占用”，却说不清它到底属于哪个进程、可能来自哪个项目。
+> 
+> 所以我做了 **LeftOpen**。
+> 它安静地待在 menu bar 里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。
+> 
+> *把那些虚掩着的门，轻轻关上。*
+
+<details>
+<summary><em>Read in English</em></summary>
+
+> When running multiple AI agents coding in parallel, local dev servers and test suites spin up continuously across random ports. At the end of a long day, the system is left running dozens of forgotten background processes.
+> 
+> Existing tools are either far too heavyweight or only spit out "port is occupied" without telling you what process or workspace project actually owns it.
+> 
+> That's why I built **LeftOpen**.
+> It sits quietly in your macOS menu bar, giving you an instant, trustworthy view of active ports, their processes, and inferred project roots. Once reviewed, you can gracefully close what you don't need.
+> 
+> *Gently closing the doors left ajar.*
+
+</details>
+
+<br />
+
 **LeftOpen** 是一个原生 macOS 菜单栏应用与命令行工具（TypeScript CLI），用于洞察正在监听本机的各类服务端口。
 
 它并不只是简单地输出一份生硬的 `lsof` 表格，而是收集进程相关的**客观事实**（工作目录、Git 仓库、`package.json`、`pyproject.toml`、macOS `.app` Bundle），据此对进程所属的项目或应用做出**严谨、克制的归属推断**，并提供安全的单键确认关闭体验。

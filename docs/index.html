@@ -280,6 +280,58 @@
       display: block;
     }
 
+    /* Story Section */
+    .story-section {
+      max-width: 760px;
+      margin: -24px auto 96px;
+    }
+
+    .story-card {
+      background: linear-gradient(180deg, #FFFFFF 0%, #FAFAF8 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px 44px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .story-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: rgba(33, 24, 17, 0.05);
+      border-radius: 99px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .story-card p {
+      font-size: 16px;
+      color: var(--text);
+      line-height: 1.85;
+      margin-bottom: 16px;
+    }
+
+    .story-card p.story-lead {
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.75;
+    }
+
+    .story-card p.story-quote {
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+      margin-top: 24px;
+      margin-bottom: 0;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
     /* Features Grid */
     .features-section {
       padding: 24px 0 80px;
@@ -522,6 +574,18 @@
         <div class="showcase-frame">
           <img src="assets/preview.jpg" alt="LeftOpen 界面预览：端口列表与安全关闭面板">
         </div>
+      </div>
+    </section>
+
+    <!-- Story Section -->
+    <section class="story-section">
+      <div class="story-card">
+        <div class="story-badge">🌿 为什么做这个</div>
+        <p class="story-lead">当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。</p>
+        <p>问题是：现有工具要么太复杂，要么只能告诉你“端口被占用”，却说不清它到底属于哪个进程、可能来自哪个项目。</p>
+        <p>所以我做了 <strong>LeftOpen</strong>。</p>
+        <p>它安静地待在 menu bar 里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。</p>
+        <p class="story-quote">“把那些虚掩着的门，轻轻关上。”</p>
       </div>
     </section>
 
