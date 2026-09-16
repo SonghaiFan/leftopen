@@ -6,6 +6,27 @@ LeftOpen is a native macOS menu-bar app and a TypeScript CLI for understanding
 local listening ports. Instead of showing only a raw `lsof` table, both collect
 observable process facts and make conservative owner inferences from them.
 
+## Installation
+
+### Via Homebrew (Recommended)
+
+Install the native macOS menu-bar app directly into `/Applications`:
+
+```bash
+brew install --cask SonghaiFan/tap/leftopen
+```
+
+> [!NOTE]
+> If macOS Gatekeeper flags the app on first launch (since this open-source build is ad-hoc signed rather than signed with an Apple Developer ID), install with `--no-quarantine`:
+> ```bash
+> brew install --cask --no-quarantine SonghaiFan/tap/leftopen
+> ```
+> or run: `xattr -cr /Applications/LeftOpen.app`
+
+### Direct Download
+
+Download the latest `LeftOpen.zip` from [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest), unzip, and drag `LeftOpen.app` to your `/Applications` folder.
+
 ## Native menu-bar app
 
 The Swift app requires macOS 14 or later. It uses SwiftUI `MenuBarExtra` with a
