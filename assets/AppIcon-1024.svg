@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="macBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#F2F1EE" />
+    </linearGradient>
+    <filter id="subtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#17120E" flood-opacity="0.12" />
+    </filter>
+  </defs>
+
+  <!-- macOS App Squircle Tile (Standard 824x824 rounded rect centered at 512,512) -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#macBg)" stroke="#E5E3DF" stroke-width="2" filter="url(#subtleShadow)" />
+
+  <!-- Layer 1: Outer Door Frame & Dark Interior Shadow -->
+  <path d="M 299.79 872.0 L 299.79 364.21 A 212.21 204.63 0 0 1 724.21 364.21 L 724.21 872.0 Z" fill="#211811" />
+
+  <!-- Layer 2: Open Door Leaf / Bright Interior -->
+  <path d="M 432.42 781.05 L 432.42 349.05 C 432.42 265.68 519.58 216.42 618.11 216.42 C 663.58 216.42 701.47 265.68 701.47 318.74 L 701.47 849.26 Z" fill="#FFFFFF" />
+
+  <!-- Layer 3: Doorknob -->
+  <circle cx="470.32" cy="519.58" r="16.67" fill="#211811" />
+</svg>

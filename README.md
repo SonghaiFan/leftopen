@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="LeftOpen Logo" width="76" height="96" />
+  <img src="assets/logo.svg" alt="LeftOpen Logo" width="56" height="95" />
   <h1>LeftOpen</h1>
   <p><strong>把那些虚掩着的门，轻轻关上。</strong></p>
   <p><em>See what your tools left running on localhost, and gently close them.</em></p>
