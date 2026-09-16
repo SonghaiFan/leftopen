@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="985" viewBox="0 0 1600 985" fill="none">
+  <defs>
+    <linearGradient id="surface" x1="0" y1="45" x2="0" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF"/><stop offset="1" stop-color="#FAFAF9"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#17120E" flood-opacity=".12"/></filter>
+    <style>
+      .title{font:700 30px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;fill:#17120E}
+      .large{font:700 32px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;fill:#17120E}
+      .name{font:500 24px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#17120E}
+      .body{font:400 19px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#5F6168}
+      .detail{font:400 20px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#17120E}
+      .section{font:600 17px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#5F6168}
+      .mono{font:500 28px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#17120E}
+      .small{font:400 17px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#5F6168}
+    </style>
+  </defs>
+  <rect width="1600" height="985" fill="#F7F6F4"/>
+  <!-- List panel -->
+  <g filter="url(#shadow)">
+    <path d="M86 67C86 57.6 93.6 50 103 50H402L420 32L438 50H750C759.4 50 767 57.6 767 67V925C767 934.4 759.4 942 750 942H103C93.6 942 86 934.4 86 925V67Z" fill="url(#surface)" stroke="#C9CBD0" stroke-width="1.4"/>
+  </g>
+  <!-- Door logo -->
+  <path d="M127 132V91C127 75 139 63 155 63C173 63 185 78 185 96V136L127 132Z" fill="#211811"/>
+  <path d="M139 130V92C139 82 146 76 155 76C165 76 173 84 173 97V126L139 130Z" fill="#FFF"/>
+  <circle cx="145" cy="105" r="2.3" fill="#211811"/>
+  <text x="189" y="113" class="title">LeftOpen</text>
+  <text x="189" y="150" class="body">25 listening ports</text><text x="391" y="150" class="body">·</text>
+  <circle cx="424" cy="142" r="13" stroke="#DE8500" stroke-width="2.4"/><path d="M411 142H437M424 129C428 134 429 140 429 142C429 147 427 152 424 155M424 129C420 134 419 140 419 142C419 147 421 152 424 155" stroke="#DE8500" stroke-width="2.1" stroke-linecap="round"/>
+  <text x="446" y="150" style="font:500 19px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#DE8500">7 LAN-facing</text>
+  <path d="M698 100C712 102 724 114 724 128C724 142 712 154 698 156M697 100L705 91M697 100L687 104" stroke="#17120E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M86 174H767" stroke="#DCDDDF"/>
+  <!-- Search -->
+  <rect x="115" y="191" width="623" height="52" rx="12" fill="#F3F3F2" stroke="#DCDDDF"/>
+  <circle cx="149" cy="216" r="11" stroke="#36383D" stroke-width="2.4"/><path d="M157 224L166 233" stroke="#36383D" stroke-width="2.4" stroke-linecap="round"/>
+  <text x="188" y="227" class="body" fill="#85878D">Search port, owner or PID</text>
+  <path d="M86 264H767" stroke="#DCDDDF"/>
+  <text x="115" y="299" class="section">Projects</text>
+  <path d="M115 315H738" stroke="#DCDDDF"/>
+  <!-- list rows -->
+  <text x="125" y="367" class="mono">5173</text><text x="297" y="354" class="name">visdelta</text><text x="297" y="383" class="body">node · PID 63,226</text>
+  <path d="M115 400H738" stroke="#E4E4E5"/>
+  <text x="125" y="452" class="mono">5175</text><text x="297" y="439" class="name">visdelta</text><text x="297" y="468" class="body">node · PID 40,961</text>
+  <path d="M115 485H738" stroke="#E4E4E5"/>
+  <text x="125" y="537" class="mono">5511</text><text x="297" y="524" class="name">visdelta</text><text x="297" y="553" class="body">node · PID 95,158</text>
+  <path d="M115 577H738" stroke="#DCDDDF"/>
+  <text x="115" y="612" class="section">Other Processes</text><path d="M115 629H738" stroke="#DCDDDF"/>
+  <text x="125" y="681" class="mono">5000 · 7000</text><text x="328" y="665" class="name">ControlCenter</text><text x="328" y="696" class="body">ControlCenter · PID 676</text><text x="691" y="678" style="font:500 18px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#DE8500">LAN</text>
+  <path d="M115 713H738" stroke="#E4E4E5"/>
+  <text x="125" y="765" class="mono">7265</text><text x="328" y="751" class="name">Raycast</text><text x="328" y="780" class="body">node · PID 68,822</text>
+  <path d="M115 798H738" stroke="#E4E4E5"/>
+  <text x="125" y="850" class="mono">9222</text><text x="328" y="836" class="name">Google Chrome</text><text x="328" y="865" class="body">Google Chrome · PID 3,933</text>
+  <path d="M86 883H767" stroke="#DCDDDF"/>
+  <text x="115" y="921" class="small">Updated 6:30 pm</text><text x="694" y="921" class="small">Quit</text>
+  <!-- Detail panel -->
+  <g filter="url(#shadow)">
+    <path d="M827 67C827 57.6 834.6 50 844 50H1156L1174 32L1192 50H1495C1504.4 50 1512 57.6 1512 67V925C1512 934.4 1504.4 942 1495 942H844C834.6 942 827 934.4 827 925V67Z" fill="url(#surface)" stroke="#C9CBD0" stroke-width="1.4"/>
+  </g>
+  <path d="M882 102L867 115L882 128" stroke="#17120E" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M927 132V91C927 75 939 63 955 63C973 63 985 78 985 96V136L927 132Z" fill="#211811"/><path d="M939 130V92C939 82 946 76 955 76C965 76 973 84 973 97V126L939 130Z" fill="#FFF"/><circle cx="945" cy="105" r="2.3" fill="#211811"/>
+  <text x="994" y="123" class="title">LeftOpen</text>
+  <path d="M1443 100C1457 102 1469 114 1469 128C1469 142 1457 154 1443 156M1442 100L1450 91M1442 100L1432 104" stroke="#17120E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M827 174H1512" stroke="#DCDDDF"/>
+  <text x="870" y="228" class="large">Port 5173</text><text x="870" y="272" style="font:500 31px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;fill:#17120E">visdelta</text><text x="870" y="313" class="body">Local only</text>
+  <path d="M870 344H1471" stroke="#DCDDDF"/>
+  <text x="870" y="389" class="body">Command</text><text x="1060" y="389" class="detail">node</text><path d="M870 412H1471" stroke="#E4E4E5"/>
+  <text x="870" y="457" class="body">PID</text><text x="1060" y="457" class="detail">63,226</text><path d="M870 481H1471" stroke="#E4E4E5"/>
+  <text x="870" y="526" class="body">Executable</text><text x="1060" y="526" class="detail">/usr/local/bin/node</text><path d="M870 550H1471" stroke="#E4E4E5"/>
+  <text x="870" y="595" class="body">Folder</text><text x="1060" y="595" class="detail">~/Documents/visdelta</text><path d="M870 619H1471" stroke="#E4E4E5"/>
+  <text x="870" y="664" class="body">Addresses</text><text x="1060" y="664" class="detail">127.0.0.1:5173</text><path d="M870 697H1471" stroke="#DCDDDF"/>
+  <path d="M880 737L889 746L880 755" stroke="#17120E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><text x="913" y="756" class="body">Why this owner?</text>
+  <rect x="870" y="815" width="601" height="67" rx="15" stroke="#73767E" stroke-width="1.5"/><text x="1064" y="858" style="font:500 25px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;fill:#17120E">Close Port 5173…</text>
+</svg>
