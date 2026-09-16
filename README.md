@@ -16,12 +16,7 @@ Install the native macOS menu-bar app directly into `/Applications`:
 brew install --cask SonghaiFan/tap/leftopen
 ```
 
-> [!NOTE]
-> If macOS Gatekeeper flags the app on first launch (since this open-source build is ad-hoc signed rather than signed with an Apple Developer ID), install with `--no-quarantine`:
-> ```bash
-> brew install --cask --no-quarantine SonghaiFan/tap/leftopen
-> ```
-> or run: `xattr -cr /Applications/LeftOpen.app`
+LeftOpen is signed with an Apple Developer ID and notarized by Apple, allowing direct execution on macOS Sonoma (14.0+) without Gatekeeper warnings.
 
 ### Direct Download
 
