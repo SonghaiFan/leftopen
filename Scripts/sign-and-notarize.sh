@@ -25,6 +25,11 @@ if [[ "$actual_bundle_id" != "$LEFTOPEN_BUNDLE_ID" ]]; then
   exit 1
 fi
 
+for bin in "${app_path}/Contents/MacOS"/*; do
+  if [[ -f "$bin" && -x "$bin" ]]; then
+    codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "$bin"
+  fi
+done
 codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "$app_path"
 codesign --verify --strict --verbose=2 "$app_path"
 ditto -c -k --keepParent "$app_path" "$zip_path"

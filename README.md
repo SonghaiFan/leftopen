@@ -50,31 +50,26 @@ brew install --cask songhaifan/tap/leftopen
 - **克制温和关闭**：关闭前显示关联端口预览；关闭瞬间校验 PID 与启动时间防误杀；仅发送 `SIGTERM` 礼貌退出，绝不擅自 `SIGKILL`，拒绝越权关闭系统进程。
 - **LAN 暴露区分**：自动标识端口是仅绑定回环地址（`127.0.0.1`），还是向局域网公开（`0.0.0.0` / LAN IP）。
 - **零后台常驻**：纯原生 SwiftUI `MenuBarExtra`。无守护进程，无 Dock 栏图标，无网络遥测，打开即用。
-- **终端 CLI 支持**：内置零外部依赖的 TypeScript 命令行工具。
+- **终端 CLI 支持**：随 App 附带原生轻量命令行工具，终端直接运行。
 
 ---
 
 ## 命令行 (CLI)
 
-```bash
-# 扫描当前端口与归属
-npm start
+安装后即可在终端直接运行：
 
-# 查看指定端口
-npm start -- 3000
+```bash
+# 查看所有监听端口与归属（或 leftopen list）
+leftopen
+
+# 查看指定端口详情
+leftopen 3000
+
+# 安全关闭指定端口（SIGTERM，提示确认）
+leftopen close 3000
 
 # 结构化 JSON 输出
-npm start -- --json
-
-# 交互式安全关闭端口（默认 No）
-npm start -- close 3000
-```
-
-全局链接：
-```bash
-npm link
-leftopen
-leftopen 3000
+leftopen --json
 ```
 
 CLI 输出示例：

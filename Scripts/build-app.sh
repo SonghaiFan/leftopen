@@ -23,6 +23,10 @@ fi
 
 mkdir -p "${app_path}/Contents/MacOS"
 cp "$binary_path" "${app_path}/Contents/MacOS/LeftOpenApp"
+if [[ -x "${binary_dir}/leftopen" ]]; then
+  cp "${binary_dir}/leftopen" "${app_path}/Contents/MacOS/leftopen"
+  chmod 755 "${app_path}/Contents/MacOS/leftopen"
+fi
 cp "${project_dir}/Resources/Info.plist" "${app_path}/Contents/Info.plist"
 if [[ -f "${project_dir}/Resources/AppIcon.icns" ]]; then
   mkdir -p "${app_path}/Contents/Resources"
