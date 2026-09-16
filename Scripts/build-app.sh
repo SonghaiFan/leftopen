@@ -24,6 +24,10 @@ fi
 mkdir -p "${app_path}/Contents/MacOS"
 cp "$binary_path" "${app_path}/Contents/MacOS/LeftOpenApp"
 cp "${project_dir}/Resources/Info.plist" "${app_path}/Contents/Info.plist"
+if [[ -f "${project_dir}/Resources/AppIcon.icns" ]]; then
+  mkdir -p "${app_path}/Contents/Resources"
+  cp "${project_dir}/Resources/AppIcon.icns" "${app_path}/Contents/Resources/AppIcon.icns"
+fi
 plutil -replace CFBundleIdentifier -string "$bundle_id" "${app_path}/Contents/Info.plist"
 chmod 755 "${app_path}/Contents/MacOS/LeftOpenApp"
 codesign --force --sign - "$app_path"
