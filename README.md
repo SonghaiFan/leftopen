@@ -47,15 +47,15 @@ brew install --cask songhaifan/tap/leftopen
 
 ---
 
-## 核心设计 (Design & Features)
+## Design & Features
 
-- **工程归属推断**：解析 `.git`、`package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod` 与 `.app` 真实目录，不再显示无意义的 `node` 或 `python`；全局 npm 包、`python -m` 模块和 Redis / Postgres / Ollama 等独立服务也能按名字识别。
-- **真实图标，不预存**：优先取 `.app` 自带图标，其次是项目或 npm 包自己带的图标（Tauri / Electron app icon、`index.html` 声明的 favicon、`public/` 约定），再从本机服务器抓 favicon，最后才用符号兜底。
-- **先看该关的**：列表把可关闭的端口排在前面，app 与系统服务折叠收起；菜单栏图标用门的开合表示是否还有开着的服务，并显示每个进程已运行多久。
-- **克制温和关闭**：关闭前显示关联端口预览；关闭瞬间校验 PID 与启动时间防误杀；仅发送 `SIGTERM` 礼貌退出，绝不擅自 `SIGKILL`，拒绝越权关闭系统进程。
-- **LAN 暴露区分**：自动标识端口是仅绑定回环地址（`127.0.0.1`），还是向局域网公开（`0.0.0.0` / LAN IP）。
-- **零后台常驻**：纯原生 SwiftUI `MenuBarExtra`。无守护进程，无 Dock 栏图标，无网络遥测，打开即用。
-- **终端 CLI 支持**：随 App 附带原生轻量命令行工具，终端直接运行。
+- **Knows whose port it is.** Walks up from the process's working directory to `.git`, `package.json`, `pyproject.toml`, `Cargo.toml` or `go.mod`, or resolves the owning `.app`. Global npm packages, `python -m` modules and standalone services (Redis, Postgres, Ollama…) are named too, so you rarely see a bare `node` or `python`.
+- **Real icons, nothing bundled.** Uses the `.app` icon when there is one; otherwise the icon the project or package ships itself (Tauri/Electron app icon, the favicon declared in `index.html`, `public/` conventions); otherwise the favicon served by the local server; otherwise a symbol.
+- **Closable first.** Ports you can close come first; apps and system services are folded away. The menu bar icon is an open or closed door, and every row shows how long the process has been running.
+- **Closes gently.** Shows the process's other ports before you confirm, re-checks PID and start time at the moment of closing, sends `SIGTERM` only. Never `SIGKILL`, never system processes.
+- **Local vs LAN.** Tells apart ports bound to `127.0.0.1` from ones on `0.0.0.0` or a LAN address.
+- **Nothing running in the background.** Native SwiftUI `MenuBarExtra`. No daemon, no Dock icon, no telemetry.
+- **Same engine in the terminal.** The app ships a `leftopen` CLI with identical inference and safety rules.
 
 ---
 
