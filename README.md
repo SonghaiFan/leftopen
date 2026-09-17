@@ -1,8 +1,8 @@
 <div align="center">
   <img src="assets/logo.svg" alt="LeftOpen Logo" width="48" height="80" />
   <h1>LeftOpen</h1>
-  <p>把那些虚掩着的门，轻轻关上。</p>
   <p><em>See what your tools left running on localhost, and gently close them.</em></p>
+  <p>把那些虚掩着的门，轻轻关上。</p>
 
   <p>
     <a href="https://songhaifan.github.io/leftopen/"><img src="https://img.shields.io/badge/website-GitHub%20Pages-211811?style=flat-square" alt="Website" /></a>
@@ -13,6 +13,8 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555555?style=flat-square" alt="License: MIT" /></a>
   </p>
 
+  <p><strong>English</strong> · <a href="README.zh-CN.md">中文</a></p>
+
   <br />
   <picture>
     <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
@@ -21,29 +23,29 @@
   <br /><br />
 </div>
 
-> 当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。
+> When I have several coding agents working in parallel, dev servers and test runners keep starting up on different ports. By the end of the day there are always a few still running.
 >
-> 现有工具要么太复杂，要么只能告诉你“端口被占用”，却说不清它到底属于哪个进程、可能来自哪个项目。
+> Existing tools are either too much, or only tell you "port in use" without saying which process it is or which project it came from.
 >
-> 所以我做了 **LeftOpen**。它安静地待在菜单栏里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。
+> So I made **LeftOpen**. It sits quietly in the menu bar and shows you the listening ports, the processes behind them and the projects they probably belong to. Once you've had a look, you close the ones you no longer need.
 >
-> *把那些虚掩着的门，轻轻关上。*
+> *Close the doors that were left ajar, gently.*
 
 ---
 
-## 安装 (Installation)
+## Installation
 
-### Homebrew (推荐)
+### Homebrew (recommended)
 
 ```bash
 brew install --cask songhaifan/tap/leftopen
 ```
 
-已通过 Apple 官方公证（Notarized），在 macOS Sonoma (14.0+) 上下载即可直接打开。
+Signed with a Developer ID and notarized by Apple; opens directly on macOS Sonoma (14.0+).
 
-### 手动下载
+### Manual download
 
-前往 [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest) 下载 `LeftOpen.zip`，解压后将 `LeftOpen.app` 移至 `/Applications`。
+Get `LeftOpen.zip` from [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest), unzip, and move `LeftOpen.app` to `/Applications`.
 
 ---
 
@@ -59,28 +61,28 @@ brew install --cask songhaifan/tap/leftopen
 
 ---
 
-## 命令行 (CLI)
+## CLI
 
-安装后即可在终端直接运行：
+Available in the terminal right after installing:
 
 ```bash
-# 查看所有监听端口与归属（或 leftopen list）
+# List every listening port and its owner (or: leftopen list)
 leftopen
 
-# 查看指定端口详情
+# Explain one port
 leftopen 3000
 
-# 在默认浏览器打开 http://localhost:3000
+# Open http://localhost:3000 in the default browser
 leftopen open 3000
 
-# 安全关闭指定端口（SIGTERM，提示确认）
+# Close the process on a port (SIGTERM, asks first)
 leftopen close 3000
 
-# 结构化 JSON 输出
+# Structured JSON output
 leftopen --json
 ```
 
-CLI 输出示例：
+Sample output:
 ```text
 LEFT OPEN
 26 listening ports · 17 processes · 1 projects · 8 LAN-visible
@@ -106,21 +108,21 @@ LOCAL = this Mac only · LAN = may be reachable from your local network
 
 ---
 
-## 构建与测试 (Development)
+## Development
 
 ```bash
-# 运行原生测试
+# Swift tests
 swift test
 
-# 运行 CLI 测试
+# CLI prototype tests
 npm test
 
-# 本地编译 App
+# Build the app locally
 LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 ```
 
 ---
 
-## 许可证 (License)
+## License
 
 [MIT License](LICENSE)

@@ -3,18 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LeftOpen — 把那些虚掩着的门，轻轻关上</title>
-  <meta name="description" content="LeftOpen 是一个原生 macOS 菜单栏应用与 CLI：看清 localhost 上还在监听的端口属于哪个项目、哪个进程，然后温和地关掉它们。">
+  <title>LeftOpen — Close the doors left ajar · 把那些虚掩着的门，轻轻关上</title>
+  <meta name="description" content="LeftOpen is a native macOS menu bar app and CLI: see which project and process each listening port on localhost belongs to, then close it gently. 看清 localhost 上还在监听的端口属于谁，然后温和地关掉。">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="apple-touch-icon" href="assets/AppIcon.png">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 
-  <meta property="og:title" content="LeftOpen — 把那些虚掩着的门，轻轻关上">
+  <meta property="og:title" content="LeftOpen — See what your tools left running on localhost">
   <meta property="og:description" content="See what your tools left running on localhost, and gently close them.">
   <meta property="og:image" content="https://songhaifan.github.io/leftopen/assets/preview.png">
   <meta property="og:type" content="website">
 
+  <script>
+    (function () {
+      var saved = null;
+      try { saved = localStorage.getItem('leftopen-lang'); } catch (e) {}
+      var lang = saved || ((navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+      document.documentElement.setAttribute('data-lang', lang);
+      document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+    })();
+  </script>
   <style>
     :root {
       --bg: #ffffff;
@@ -44,6 +53,14 @@
         --shadow-panel: 0 40px 80px -24px rgba(0, 0, 0, 0.9), 0 12px 28px -12px rgba(0, 0, 0, 0.6);
       }
     }
+
+    /* Bilingual: every text block exists twice; <html data-lang> picks one. */
+    html[data-lang="en"] [lang="zh"], html[data-lang="zh"] [lang="en"] { display: none !important; }
+    .lang-toggle {
+      border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--ink-2);
+      font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; letter-spacing: 0.02em;
+    }
+    .lang-toggle:hover { color: var(--ink); background: var(--bg-2); }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
@@ -204,99 +221,123 @@
         <a href="#cli">CLI</a>
         <a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a>
         <a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
+        <button class="lang-toggle" id="lang" type="button" aria-label="Switch language"><span lang="zh">EN</span><span lang="en">中文</span></button>
       </nav>
     </header>
 
     <main>
       <section class="hero" style="border-top:0">
         <div>
-          <h1>把那些虚掩着的门，<br>轻轻关上。</h1>
-          <p class="en">See what your tools left running on localhost — which project, which process, how long — and gently close them.</p>
+          <h1 lang="zh">把那些虚掩着的门，<br>轻轻关上。</h1>
+          <h1 lang="en">Close the doors<br>left ajar.</h1>
+          <p class="en" lang="zh">See what your tools left running on localhost — which project, which process, how long — and gently close them.</p>
+          <p class="en" lang="en">See what your tools left running on localhost — which project, which process, how long — and gently close them.</p>
           <div class="install">
             <code><span class="p">$ </span>brew install --cask songhaifan/tap/leftopen</code>
-            <button id="copy" type="button" aria-label="复制安装命令">复制</button>
+            <button id="copy" type="button" aria-label="Copy install command"><span lang="zh">复制</span><span lang="en">Copy</span></button>
           </div>
-          <p class="alt">或者下载 <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.0)</a>，解压后拖进「应用程序」。</p>
+          <p class="alt" lang="zh">或者下载 <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.0)</a>，解压后拖进「应用程序」。</p>
+          <p class="alt" lang="en">Or download <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.0)</a> and drop it into Applications.</p>
           <div class="badges">
-            <span>macOS 14+</span><span>Apple 公证</span><span>原生 SwiftUI</span><span>MIT</span>
+            <span>macOS 14+</span><span lang="zh">Apple 公证</span><span lang="en">Notarized by Apple</span><span lang="zh">原生 SwiftUI</span><span lang="en">Native SwiftUI</span><span>MIT</span>
           </div>
         </div>
         <figure class="shot">
           <picture>
             <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
-            <img src="assets/preview.png" width="375" height="460" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起">
+            <img src="assets/preview.png" width="375" height="460" alt="LeftOpen menu bar panel: closable ports first, apps and system services folded away">
           </picture>
         </figure>
       </section>
 
       <section id="sees">
-        <p class="kicker">它看到什么</p>
+        <p class="kicker" lang="zh">它看到什么</p>
+        <p class="kicker" lang="en">What it sees</p>
         <div class="sees">
           <div class="item">
             <span class="n">01</span>
             <div>
-              <h3>端口属于哪个项目</h3>
-              <p>沿工作目录向上找 <code>.git</code>、<code>package.json</code>、<code>pyproject.toml</code>、<code>Cargo.toml</code>、<code>go.mod</code>；全局 npm 包、<code>python -m</code> 模块、Redis / Postgres / Ollama 这类独立服务也按名字识别，不再只是一个 <code>node</code>。</p>
+              <h3 lang="zh">端口属于哪个项目</h3>
+              <h3 lang="en">Whose port it is</h3>
+              <p lang="zh">沿工作目录向上找 <code>.git</code>、<code>package.json</code>、<code>pyproject.toml</code>、<code>Cargo.toml</code>、<code>go.mod</code>；全局 npm 包、<code>python -m</code> 模块、Redis / Postgres / Ollama 这类独立服务也按名字识别，不再只是一个 <code>node</code>。</p>
+              <p lang="en">Walks up from the working directory to <code>.git</code>, <code>package.json</code>, <code>pyproject.toml</code>, <code>Cargo.toml</code> or <code>go.mod</code>. Global npm packages, <code>python -m</code> modules and standalone services like Redis, Postgres or Ollama are named too — not just <code>node</code>.</p>
             </div>
           </div>
           <div class="item">
             <span class="n">02</span>
             <div>
-              <h3>真实图标，不预存</h3>
-              <p>先取 .app 自带图标；再找项目或包自己带的（Tauri / Electron app icon、<code>index.html</code> 声明的 favicon、<code>public/</code> 约定）；最后向本机服务器抓 favicon。LeftOpen 自己不打包任何第三方图标。</p>
+              <h3 lang="zh">真实图标，不预存</h3>
+              <h3 lang="en">Real icons, nothing bundled</h3>
+              <p lang="zh">先取 .app 自带图标；再找项目或包自己带的（Tauri / Electron app icon、<code>index.html</code> 声明的 favicon、<code>public/</code> 约定）；最后向本机服务器抓 favicon。LeftOpen 自己不打包任何第三方图标。</p>
+              <p lang="en">The .app icon when there is one; otherwise what the project or package ships itself (Tauri / Electron app icon, the favicon declared in <code>index.html</code>, <code>public/</code> conventions); otherwise the favicon served by the local server. LeftOpen carries no third-party icons of its own.</p>
             </div>
           </div>
           <div class="item">
             <span class="n">03</span>
             <div>
-              <h3>先看该关的</h3>
-              <p>可关闭的端口排在最前，系统服务和 app 折叠收起。菜单栏用门的开合告诉你还有没有服务开着，每一行都标着它已经跑了多久。</p>
+              <h3 lang="zh">先看该关的</h3>
+              <h3 lang="en">Closable first</h3>
+              <p lang="zh">可关闭的端口排在最前，系统服务和 app 折叠收起。菜单栏用门的开合告诉你还有没有服务开着，每一行都标着它已经跑了多久。</p>
+              <p lang="en">Ports you can close come first; system services and apps fold away. The menu bar icon is an open or closed door, and every row shows how long the process has been running.</p>
             </div>
           </div>
           <div class="item">
             <span class="n">04</span>
             <div>
-              <h3>谁在局域网可见</h3>
-              <p>区分只绑在 <code>127.0.0.1</code> 的端口和绑在 <code>0.0.0.0</code> / 局域网 IP 上的端口，开发接口意外暴露时一眼能看到。</p>
+              <h3 lang="zh">谁在局域网可见</h3>
+              <h3 lang="en">Local or LAN</h3>
+              <p lang="zh">区分只绑在 <code>127.0.0.1</code> 的端口和绑在 <code>0.0.0.0</code> / 局域网 IP 上的端口，开发接口意外暴露时一眼能看到。</p>
+              <p lang="en">Tells apart ports bound to <code>127.0.0.1</code> from ones on <code>0.0.0.0</code> or a LAN address, so an accidentally exposed dev server stands out.</p>
             </div>
           </div>
         </div>
       </section>
 
       <section id="restraint">
-        <p class="kicker">它不做什么</p>
+        <p class="kicker" lang="zh">它不做什么</p>
+        <p class="kicker" lang="en">What it won't do</p>
         <div class="restraint">
-          <p class="lede">关门的动作要轻。LeftOpen 只做请求，不做强迫，也不替你判断。</p>
+          <p class="lede" lang="zh">关门的动作要轻。LeftOpen 只做请求，不做强迫，也不替你判断。</p>
+          <p class="lede" lang="en">Closing a door should be gentle. LeftOpen asks; it never forces, and it never decides for you.</p>
           <ul class="rules">
-            <li><b>只发 SIGTERM</b><span>请进程自己清理退出。不 <code>kill -9</code>，不杀进程树，没有「强制」按钮。</span></li>
-            <li><b>关前校验</b><span>关闭瞬间重新核对 PID 与启动时间，进程已换人就不动手；先列出同一进程的其他端口再让你确认。</span></li>
-            <li><b>不碰系统和 app</b><span>操作系统进程、别人的 <code>.app</code>、不属于你的用户——拒绝关闭，只展示。</span></li>
-            <li><b>零常驻，零遥测</b><span>没有守护进程、LaunchAgent 或网络上报。只在面板打开和每分钟一次的刷新时做本地只读扫描。</span></li>
+            <li><b lang="zh">只发 SIGTERM</b><b lang="en">SIGTERM only</b><span lang="zh">请进程自己清理退出。不 <code>kill -9</code>，不杀进程树，没有「强制」按钮。</span><span lang="en">Asks the process to clean up and exit. No <code>kill -9</code>, no process trees, no “force” button.</span></li>
+            <li><b lang="zh">关前校验</b><b lang="en">Checks before closing</b><span lang="zh">关闭瞬间重新核对 PID 与启动时间，进程已换人就不动手；先列出同一进程的其他端口再让你确认。</span><span lang="en">Re-checks PID and start time at the moment of closing and backs off if the process has been replaced; lists the process's other ports before you confirm.</span></li>
+            <li><b lang="zh">不碰系统和 app</b><b lang="en">Leaves apps and the system alone</b><span lang="zh">操作系统进程、别人的 <code>.app</code>、不属于你的用户——拒绝关闭，只展示。</span><span lang="en">OS processes, other people's <code>.app</code>s, other users' processes — shown, never closed.</span></li>
+            <li><b lang="zh">零常驻，零遥测</b><b lang="en">No daemon, no telemetry</b><span lang="zh">没有守护进程、LaunchAgent 或网络上报。只在面板打开和每分钟一次的刷新时做本地只读扫描。</span><span lang="en">No background process, LaunchAgent or network reporting. A local read-only scan when the panel opens and once a minute.</span></li>
           </ul>
         </div>
       </section>
 
       <section id="origin">
-        <p class="kicker">为什么做它</p>
-        <div class="origin">
+        <p class="kicker" lang="zh">为什么做它</p>
+        <p class="kicker" lang="en">Why it exists</p>
+        <div class="origin" lang="zh">
           <p>当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。</p>
           <p>现有工具要么太复杂，要么只能告诉你「端口被占用」，却说不清它到底属于哪个进程、可能来自哪个项目。</p>
           <p>所以我做了 LeftOpen。它安静地待在菜单栏里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。</p>
           <p class="sig">把那些虚掩着的门，轻轻关上。</p>
         </div>
+        <div class="origin" lang="en">
+          <p>When I have several coding agents working in parallel, dev servers and test runners keep starting up on different ports. By the end of the day there are always a few still running.</p>
+          <p>Existing tools are either too much, or only tell you “port in use” without saying which process it is or which project it came from.</p>
+          <p>So I made LeftOpen. It sits quietly in the menu bar and shows you the listening ports, the processes behind them and the projects they probably belong to. Once you've had a look, you close the ones you no longer need.</p>
+          <p class="sig">把那些虚掩着的门，轻轻关上。 — Close the doors left ajar, gently.</p>
+        </div>
       </section>
 
       <section id="cli">
-        <p class="kicker">终端里也一样</p>
+        <p class="kicker" lang="zh">终端里也一样</p>
+        <p class="kicker" lang="en">Same thing in the terminal</p>
         <div class="cli">
           <div>
-            <p>App 里附带同一个引擎的命令行版本，装好就能用。归属推断、关闭前的校验、只发 SIGTERM——规则完全一致。</p>
+            <p lang="zh">App 里附带同一个引擎的命令行版本，装好就能用。归属推断、关闭前的校验、只发 SIGTERM——规则完全一致。</p>
+            <p lang="en">The app ships a CLI built on the same engine, available as soon as you install. Ownership inference, the pre-close checks, SIGTERM only — identical rules.</p>
             <ul class="cmds">
-              <li><code>leftopen</code><span>列出所有监听端口与归属</span></li>
-              <li><code>leftopen 3000</code><span>解释这个端口是谁的</span></li>
-              <li><code>leftopen open 3000</code><span>在浏览器打开 localhost:3000</span></li>
-              <li><code>leftopen close 3000</code><span>请它退出（SIGTERM，先确认）</span></li>
-              <li><code>leftopen --json</code><span>给脚本和 agent 用的结构化输出</span></li>
+              <li><code>leftopen</code><span lang="zh">列出所有监听端口与归属</span><span lang="en">List every listening port and its owner</span></li>
+              <li><code>leftopen 3000</code><span lang="zh">解释这个端口是谁的</span><span lang="en">Explain who owns a port</span></li>
+              <li><code>leftopen open 3000</code><span lang="zh">在浏览器打开 localhost:3000</span><span lang="en">Open localhost:3000 in the browser</span></li>
+              <li><code>leftopen close 3000</code><span lang="zh">请它退出（SIGTERM，先确认）</span><span lang="en">Ask it to exit (SIGTERM, confirms first)</span></li>
+              <li><code>leftopen --json</code><span lang="zh">给脚本和 agent 用的结构化输出</span><span lang="en">Structured output for scripts and agents</span></li>
             </ul>
           </div>
           <div class="term"><pre><span class="d">$</span> leftopen
@@ -326,19 +367,26 @@ LAN   = may be reachable from your local network</span></pre></div>
       </section>
 
       <section id="faq">
-        <p class="kicker">常见问题</p>
+        <p class="kicker" lang="zh">常见问题</p>
+        <p class="kicker" lang="en">Questions</p>
         <div class="faq">
           <div>
-            <h3>为什么不做一键强杀？</h3>
-            <p>服务可能还握着没写盘的数据。SIGTERM 给它一个体面退出的机会；真要强杀，你在终端里 <code>kill -9</code> 只需要一秒，不必由 LeftOpen 替你决定。</p>
+            <h3 lang="zh">为什么不做一键强杀？</h3>
+            <h3 lang="en">Why no force-kill button?</h3>
+            <p lang="zh">服务可能还握着没写盘的数据。SIGTERM 给它一个体面退出的机会；真要强杀，你在终端里 <code>kill -9</code> 只需要一秒，不必由 LeftOpen 替你决定。</p>
+            <p lang="en">A service may still hold data it hasn't written. SIGTERM gives it a chance to exit cleanly; if you really need to, <code>kill -9</code> in a terminal takes a second — that call shouldn't be LeftOpen's.</p>
           </div>
           <div>
-            <h3>图标是从哪来的？</h3>
-            <p>全部来自你这台 Mac 上已有的东西：.app、项目仓库、npm 包目录，或本机服务器自己提供的 favicon。找不到就用一个符号，不会去网上下载。</p>
+            <h3 lang="zh">图标是从哪来的？</h3>
+            <h3 lang="en">Where do the icons come from?</h3>
+            <p lang="zh">全部来自你这台 Mac 上已有的东西：.app、项目仓库、npm 包目录，或本机服务器自己提供的 favicon。找不到就用一个符号，不会去网上下载。</p>
+            <p lang="en">Only from what's already on your Mac: .app bundles, project repos, npm package folders, or the favicon a local server serves. When there's nothing, a symbol — never a download.</p>
           </div>
           <div>
-            <h3>安全与公证</h3>
-            <p>由 Apple Developer ID 签名并经 Apple 公证装订，macOS Sonoma 上下载即可打开。源码 MIT 开源，Homebrew cask 的校验和与 Release 一一对应。</p>
+            <h3 lang="zh">安全与公证</h3>
+            <h3 lang="en">Signing and notarization</h3>
+            <p lang="zh">由 Apple Developer ID 签名并经 Apple 公证装订，macOS Sonoma 上下载即可打开。源码 MIT 开源，Homebrew cask 的校验和与 Release 一一对应。</p>
+            <p lang="en">Signed with an Apple Developer ID and notarized, so it opens directly on macOS Sonoma. MIT-licensed source; the Homebrew cask checksum matches the GitHub release.</p>
           </div>
         </div>
       </section>
@@ -355,11 +403,19 @@ LAN   = may be reachable from your local network</span></pre></div>
   </div>
 
   <script>
+    document.getElementById('lang').addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-lang') === 'zh' ? 'en' : 'zh';
+      document.documentElement.setAttribute('data-lang', next);
+      document.documentElement.setAttribute('lang', next === 'zh' ? 'zh-CN' : 'en');
+      try { localStorage.setItem('leftopen-lang', next); } catch (e) {}
+    });
     document.getElementById('copy').addEventListener('click', function () {
       var btn = this;
       navigator.clipboard.writeText('brew install --cask songhaifan/tap/leftopen').then(function () {
-        btn.textContent = '已复制';
-        setTimeout(function () { btn.textContent = '复制'; }, 1800);
+        var zh = document.documentElement.getAttribute('data-lang') === 'zh';
+        var original = btn.innerHTML;
+        btn.textContent = zh ? '已复制' : 'Copied';
+        setTimeout(function () { btn.innerHTML = original; }, 1800);
       });
     });
   </script>
