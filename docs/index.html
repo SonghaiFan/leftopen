@@ -19,7 +19,7 @@
     (function () {
       var saved = null;
       try { saved = localStorage.getItem('leftopen-lang'); } catch (e) {}
-      var lang = saved || ((navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+      var lang = saved === 'zh' ? 'zh' : 'en';
       document.documentElement.setAttribute('data-lang', lang);
       document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
     })();
