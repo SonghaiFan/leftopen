@@ -26,14 +26,15 @@ func scopeLabel(_ scope: ListenerScope) -> String {
 func printSection(_ title: String, activities: [Activity]) {
     guard !activities.isEmpty else { return }
     print("\n\(bold(title)) \(dim("(\(activities.count))"))")
-    print(dim("\(pad("PORT", 8))\(pad("PID", 9))\(pad("OWNER", 29))\(pad("PROCESS", 25))SCOPE"))
+    print(dim("\(pad("PORT", 8))\(pad("PID", 9))\(pad("OWNER", 26))\(pad("PROCESS", 20))\(pad("AGE", 9))SCOPE"))
     for activity in activities {
         let portStr = pad(activity.listener.port, 8)
         let pidStr = pad(activity.process.pid, 9)
-        let ownerStr = pad(String(activity.inference.label.prefix(27)), 29)
-        let procStr = pad(String(activity.process.command.prefix(23)), 25)
+        let ownerStr = pad(String(activity.inference.label.prefix(24)), 26)
+        let procStr = pad(String(activity.process.command.prefix(18)), 20)
+        let ageStr = pad(activity.process.compactUptime ?? "—", 9)
         let scopeStr = scopeLabel(activity.scope)
-        print("\(portStr)\(pidStr)\(ownerStr)\(procStr)\(scopeStr)")
+        print("\(portStr)\(pidStr)\(ownerStr)\(procStr)\(ageStr)\(scopeStr)")
         if let marker = activity.projectMarker {
             print(dim("         ↳ \(compactPath(marker.root))"))
         }
@@ -52,6 +53,7 @@ func printOverview(activities: [Activity]) {
     let sections: [(OwnerCategory, String)] = [
         (.project, "MY PROJECTS"),
         (.application, "APPLICATIONS"),
+        (.service, "SERVICES"),
         (.systemService, "SYSTEM SERVICES"),
         (.unknown, "UNKNOWN"),
     ]
@@ -71,8 +73,13 @@ func printDetail(port: Int, activities: [Activity]) {
     print("\n\(bold("PORT \(port)")) · \(matches.count) listener\(matches.count == 1 ? "" : "s")")
     for (idx, activity) in matches.enumerated() {
         if idx > 0 { print(dim(String(repeating: "─", count: 56))) }
+        print("URL:        http://localhost:\(activity.listener.port)")
         print("Owner:      \(activity.inference.label)")
         print("Type:       \(activity.inference.category.rawValue)")
+        if let uptime = activity.process.uptime {
+            let rawStr = activity.process.rawElapsedTime.map { " (\($0))" } ?? ""
+            print("Uptime:     \(uptime)\(rawStr)")
+        }
         print("Confidence: \(activity.inference.confidence)")
         print("Process:    \(activity.process.command)")
         print("PID:        \(activity.process.pid)")
@@ -176,15 +183,32 @@ func runClose(port: Int, targetPID: Int32?, dryRun: Bool, autoConfirm: Bool, act
     }
 }
 
+func runOpen(port: Int, activities: [Activity]) {
+    let urlString = "http://localhost:\(port)"
+    let isListening = activities.contains { $0.listener.port == port }
+    if !isListening {
+        print(yellow("Notice: Nothing was detected listening on port \(port)."))
+    }
+    print("Opening \(cyan(urlString)) in default browser…")
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    process.arguments = [urlString]
+    try? process.run()
+    process.waitUntilExit()
+}
+
 func printJSON(snapshot: ScanSnapshot) {
     var list: [[String: Any]] = []
     for a in snapshot.activities {
         var item: [String: Any] = [
             "port": a.listener.port,
+            "url": "http://localhost:\(a.listener.port)",
             "addresses": a.listener.addresses,
             "scope": a.scope.rawValue,
             "pid": a.process.pid,
             "command": a.process.command,
+            "uptime": a.process.uptime as Any,
+            "rawElapsedTime": a.process.rawElapsedTime as Any,
             "cwd": a.process.cwd as Any,
             "executable": a.process.executablePath as Any,
             "user": a.process.user as Any,
@@ -219,6 +243,7 @@ func printHelp() {
 Usage:
   leftopen [list]        Show all listening activity
   leftopen <port>        Explain who owns a port
+  leftopen open <port>   Open http://localhost:<port> in default browser
   leftopen close <port>  Gracefully close the process listening on a port
   leftopen --json        Print machine-readable output
 
@@ -262,6 +287,15 @@ let nonFlagArgs = args.filter { !$0.hasPrefix("-") }
 
 if nonFlagArgs.isEmpty || nonFlagArgs == ["list"] || nonFlagArgs == ["ls"] {
     printOverview(activities: snapshot.activities)
+    exit(0)
+}
+
+if nonFlagArgs[0] == "open" {
+    guard nonFlagArgs.count >= 2, let port = Int(nonFlagArgs[1]), port >= 1, port <= 65535 else {
+        print("\(red("ERROR")) Invalid or missing port. Usage: leftopen open <port>")
+        exit(1)
+    }
+    runOpen(port: port, activities: snapshot.activities)
     exit(0)
 }
 
