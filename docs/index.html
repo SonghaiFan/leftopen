@@ -4,555 +4,361 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LeftOpen — 把那些虚掩着的门，轻轻关上</title>
-  <meta name="description" content="LeftOpen 是一个轻量级原生 macOS 菜单栏应用与 CLI，帮助你洞察本地端口占用，温和安全地关闭无用服务。">
+  <meta name="description" content="LeftOpen 是一个原生 macOS 菜单栏应用与 CLI：看清 localhost 上还在监听的端口属于哪个项目、哪个进程，然后温和地关掉它们。">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="apple-touch-icon" href="assets/AppIcon.png">
-  <meta name="theme-color" content="#FBFBFA">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 
-  <!-- Open Graph -->
   <meta property="og:title" content="LeftOpen — 把那些虚掩着的门，轻轻关上">
   <meta property="og:description" content="See what your tools left running on localhost, and gently close them.">
-  <meta property="og:image" content="assets/preview.jpg">
+  <meta property="og:image" content="https://songhaifan.github.io/leftopen/assets/preview.png">
   <meta property="og:type" content="website">
 
   <style>
     :root {
-      --bg: #FBFBFA;
-      --surface: #FFFFFF;
-      --surface-subtle: #F6F6F4;
-      --border: #E8E7E4;
-      --border-dark: #D4D2CD;
-      --text: #17120E;
-      --text-secondary: #6B6864;
-      --text-tertiary: #9B9893;
-      --accent: #211811;
-      --radius-sm: 8px;
-      --radius-md: 12px;
-      --radius-lg: 18px;
-      --shadow-sm: 0 1px 3px rgba(23, 18, 14, 0.04);
-      --shadow-md: 0 8px 24px rgba(23, 18, 14, 0.06);
-      --shadow-lg: 0 16px 44px rgba(23, 18, 14, 0.08);
-      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --bg: #ffffff;
+      --bg-2: #f5f5f7;
+      --ink: #1d1d1f;
+      --ink-2: #6e6e73;
+      --ink-3: #a1a1a6;
+      --line: #e8e8ed;
+      --line-strong: #d2d2d7;
+      --accent: #e0832e;      /* the LAN orange from the app */
+      --term: #1d1d1f;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", system-ui, sans-serif;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+      --shadow-panel: 0 40px 80px -24px rgba(0, 0, 0, 0.28), 0 12px 28px -12px rgba(0, 0, 0, 0.12);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --bg-2: #1d1d1f;
+        --ink: #f5f5f7;
+        --ink-2: #a1a1a6;
+        --ink-3: #6e6e73;
+        --line: #2a2a2e;
+        --line-strong: #3a3a3f;
+        --accent: #f09a4d;
+        --term: #161617;
+        --shadow-panel: 0 40px 80px -24px rgba(0, 0, 0, 0.9), 0 12px 28px -12px rgba(0, 0, 0, 0.6);
+      }
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
     body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 17px;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
-      overflow-x: hidden;
     }
+    a { color: inherit; text-decoration: none; }
+    code { font-family: var(--mono); font-size: 0.92em; }
 
-    header.navbar {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      background: rgba(251, 251, 250, 0.88);
-      border-bottom: 1px solid var(--border);
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+    /* ---- top bar ------------------------------------------------------ */
+    .top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 0;
     }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+    .brand img { width: 15px; height: 25px; }
+    .top nav { display: flex; gap: 26px; font-size: 13px; color: var(--ink-2); }
+    .top nav a:hover { color: var(--ink); }
 
-    .nav-container {
-      max-width: 980px;
-      margin: 0 auto;
-      height: 56px;
-      padding: 0 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      color: var(--text);
-      font-weight: 600;
-      font-size: 17px;
-      letter-spacing: -0.01em;
-    }
-
-    .brand img {
-      width: 18px;
-      height: 28px;
-    }
-
-    .github-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 99px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text);
-      text-decoration: none;
-      transition: all 0.15s ease;
-    }
-
-    .github-link:hover {
-      background: var(--surface-subtle);
-      border-color: var(--border-dark);
-    }
-
-    main {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 0 20px;
-    }
-
+    /* ---- hero --------------------------------------------------------- */
     .hero {
-      padding: 64px 0 40px;
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      display: flex; flex-direction: column; align-items: center; text-align: center;
+      padding: 72px 0 96px;
     }
-
-    .pill-tag {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 14px;
-      background: var(--surface);
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-      border-radius: 99px;
-      font-size: 12px;
-      font-weight: 500;
-      margin-bottom: 20px;
-    }
-
     .hero h1 {
-      font-size: clamp(32px, 5vw, 48px);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.2;
-      color: var(--text);
-      margin-bottom: 12px;
-    }
-
-    .hero p.en-tagline {
-      font-size: clamp(15px, 2vw, 18px);
-      color: var(--text-secondary);
-      max-width: 540px;
-      margin: 0 auto 28px;
-      font-weight: 400;
-    }
-
-    .install-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: 6px 8px 6px 16px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      box-shadow: var(--shadow-sm);
-      max-width: 480px;
-      width: 100%;
-      margin-bottom: 14px;
-    }
-
-    .install-cmd {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      color: var(--text);
-      white-space: nowrap;
-      overflow-x: auto;
-      flex: 1;
-    }
-
-    .install-cmd span.prefix {
-      color: var(--text-tertiary);
-      user-select: none;
-    }
-
-    .copy-btn {
-      background: var(--accent);
-      color: #FFF;
-      border: none;
-      border-radius: var(--radius-sm);
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: opacity 0.15s ease;
-      white-space: nowrap;
-    }
-
-    .copy-btn:hover {
-      opacity: 0.88;
-    }
-
-    .download-sub {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-bottom: 48px;
-    }
-
-    .download-sub a {
-      color: var(--text);
-      text-decoration: underline;
-      text-underline-offset: 3px;
-    }
-
-    .showcase {
-      display: flex;
-      justify-content: center;
-      margin-bottom: 72px;
-    }
-
-    .showcase-frame {
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-      box-shadow: var(--shadow-lg);
-      border: 1px solid var(--border);
-      background: var(--surface);
-      max-width: 760px;
-      width: 100%;
-    }
-
-    .showcase-frame img {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-
-    .story-section {
-      max-width: 680px;
-      margin: 0 auto 72px;
-    }
-
-    .story-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: 32px 36px;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .story-label {
-      font-size: 12px;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-tertiary);
-      margin-bottom: 16px;
+      font-size: clamp(38px, 6.2vw, 64px);
+      line-height: 1.12;
+      letter-spacing: -0.025em;
+      margin-bottom: 18px;
     }
-
-    .story-card p {
-      font-size: 15px;
-      color: var(--text);
-      line-height: 1.8;
-      margin-bottom: 14px;
-    }
-
-    .story-card p:last-child {
-      margin-bottom: 0;
-      font-style: italic;
-      color: var(--text-secondary);
-    }
-
-    .features-section {
-      margin-bottom: 72px;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 18px;
-    }
-
-    .feature-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: 24px 20px;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .feature-card h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 8px;
+    .hero .en {
+      font-size: 20px; color: var(--ink-2); max-width: 32em; margin: 0 auto 36px; line-height: 1.5;
       letter-spacing: -0.01em;
-      color: var(--text);
+    }
+    .install {
+      display: inline-flex; align-items: stretch; text-align: left;
+      border: 1px solid var(--line-strong); border-radius: 12px;
+      background: var(--bg); overflow: hidden; max-width: 100%;
+    }
+    .install code {
+      font-family: var(--mono); font-size: 13.5px; padding: 12px 18px;
+      white-space: nowrap; overflow-x: auto; color: var(--ink);
+    }
+    .install code .p { color: var(--ink-3); }
+    .install button {
+      border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink-2);
+      font: inherit; font-size: 13px; padding: 0 16px; cursor: pointer;
+    }
+    .install button:hover { color: var(--ink); background: var(--bg-2); }
+    .hero .alt { margin-top: 14px; font-size: 13px; color: var(--ink-3); }
+    .hero .alt a { color: var(--ink-2); }
+    .hero .alt a:hover { color: var(--ink); text-decoration: underline; }
+    .hero .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 22px; font-size: 12.5px; color: var(--ink-3); }
+    .hero .badges span::before { content: "·"; margin-right: 10px; color: var(--line-strong); }
+    .hero .badges span:first-child::before { content: none; }
+
+    .shot { width: min(100%, 440px); margin-top: 72px; }
+    .shot img {
+      display: block; width: 100%; height: auto;
+      border-radius: 16px; box-shadow: var(--shadow-panel);
     }
 
-    .feature-card p {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.6;
+    /* ---- section scaffolding ----------------------------------------- */
+    section { padding: 96px 0; border-top: 1px solid var(--line); }
+    .kicker {
+      font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
+      color: var(--ink-3); margin-bottom: 36px;
     }
 
-    .terminal-section {
-      background: #17120E;
-      color: #E8E7E4;
-      border-radius: var(--radius-md);
-      padding: 28px 24px;
-      margin-bottom: 72px;
-      box-shadow: var(--shadow-md);
-    }
+    /* ---- what it sees ------------------------------------------------- */
+    .sees { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px 64px; }
+    .sees .item { display: grid; grid-template-columns: 30px 1fr; gap: 12px; }
+    .sees .n { font-family: var(--mono); font-size: 12px; color: var(--ink-3); padding-top: 7px; }
+    .sees h3 { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
+    .sees p { color: var(--ink-2); font-size: 15px; line-height: 1.6; }
+    .sees code { color: var(--ink); }
 
-    .terminal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      font-size: 12px;
-      color: #7E7C79;
-      font-family: var(--font-mono);
+    /* ---- restraint ---------------------------------------------------- */
+    .restraint { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 64px; }
+    .restraint .lede { font-size: 32px; font-weight: 600; line-height: 1.25; letter-spacing: -0.025em; }
+    .rules { list-style: none; border-top: 1px solid var(--line); }
+    .rules li {
+      display: grid; grid-template-columns: 140px 1fr; gap: 16px;
+      padding: 18px 0; border-bottom: 1px solid var(--line); font-size: 15px;
     }
+    .rules li b { font-weight: 600; letter-spacing: -0.01em; }
+    .rules li span { color: var(--ink-2); }
+    .rules li code { color: var(--ink); }
 
-    .terminal-body pre {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.6;
-      overflow-x: auto;
+    /* ---- origin ------------------------------------------------------- */
+    .origin { max-width: 640px; }
+    .origin p { color: var(--ink-2); margin-bottom: 20px; font-size: 17px; }
+    .origin p:first-of-type { color: var(--ink); font-size: 21px; line-height: 1.5; letter-spacing: -0.015em; }
+    .origin .sig { color: var(--ink); font-weight: 600; letter-spacing: -0.015em; margin-top: 8px; }
+
+    /* ---- cli ---------------------------------------------------------- */
+    .cli { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: start; }
+    .cli p { color: var(--ink-2); font-size: 15px; margin-bottom: 22px; }
+    .cmds { list-style: none; }
+    .cmds li { display: grid; grid-template-columns: 190px 1fr; gap: 12px; padding: 10px 0; font-size: 14px; border-top: 1px solid var(--line); }
+    .cmds li:last-child { border-bottom: 1px solid var(--line); }
+    .cmds code { font-size: 13px; }
+    .cmds span { color: var(--ink-2); }
+    .term {
+      background: var(--term); color: #f5f5f7; border-radius: 18px;
+      font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+      padding: 22px 24px; overflow-x: auto;
     }
+    .term pre { margin: 0; white-space: pre; }
+    .term .d { color: #86868b; }
+    .term .h { color: #fff; font-weight: 600; }
+    .term .lan { color: var(--accent); }
 
-    .cmd { color: #A0C4FF; }
-    .subtle { color: #7E7C79; }
-
-    .faq-section {
-      max-width: 680px;
-      margin: 0 auto 72px;
-    }
-
-    .faq-item {
-      border-bottom: 1px solid var(--border);
-      padding: 20px 0;
-    }
-
-    .faq-item:first-child {
-      border-top: 1px solid var(--border);
-    }
-
-    .faq-item h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 6px;
-      color: var(--text);
-    }
-
-    .faq-item p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.65;
-    }
+    /* ---- faq ---------------------------------------------------------- */
+    .faq { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 48px; }
+    .faq h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 8px; }
+    .faq p { font-size: 14.5px; color: var(--ink-2); }
 
     footer {
-      border-top: 1px solid var(--border);
-      padding: 40px 20px;
-      background: var(--surface);
-      text-align: center;
-      font-size: 13px;
-      color: var(--text-secondary);
+      border-top: 1px solid var(--line); padding: 32px 0 56px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12.5px; color: var(--ink-3);
     }
+    footer nav { display: flex; gap: 20px; }
+    footer nav a:hover { color: var(--ink); }
 
-    footer a {
-      color: var(--text);
-      text-decoration: none;
+    @media (max-width: 1000px) {
+      .cli { grid-template-columns: 1fr; }
     }
-
-    footer a:hover {
-      text-decoration: underline;
-    }
-
-    .footer-content {
-      max-width: 980px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-    }
-
-    @media (max-width: 640px) {
-      .install-box {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 12px;
-      }
-      .copy-btn {
-        justify-content: center;
-      }
+    @media (max-width: 820px) {
+      .hero { padding: 40px 0 72px; }
+      .hero .en { font-size: 18px; }
+      .shot { margin-top: 48px; width: min(100%, 380px); }
+      section { padding: 72px 0; }
+      .sees, .restraint, .faq { grid-template-columns: 1fr; gap: 40px; }
+      .restraint .lede { font-size: 28px; }
+      .rules li { grid-template-columns: 1fr; gap: 4px; }
+      .cmds li { grid-template-columns: 1fr; gap: 2px; }
+      .top nav { gap: 18px; }
+      footer { flex-direction: column; gap: 14px; align-items: flex-start; }
     }
   </style>
 </head>
 <body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="#"><img src="assets/logo.svg" alt="">LeftOpen</a>
+      <nav>
+        <a href="#cli">CLI</a>
+        <a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a>
+        <a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
+      </nav>
+    </header>
 
-  <header class="navbar">
-    <div class="nav-container">
-      <a href="#" class="brand">
-        <img src="assets/logo.svg" alt="LeftOpen Logo">
-        <span>LeftOpen</span>
-      </a>
-      <a href="https://github.com/SonghaiFan/leftopen" target="_blank" rel="noopener" class="github-link">
-        <svg height="15" width="15" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-        </svg>
-        <span>GitHub</span>
-      </a>
-    </div>
-  </header>
-
-  <main>
-    <section class="hero">
-      <div class="pill-tag">
-        <span>Apple 官方公证 · macOS Sonoma 14+</span>
-      </div>
-      <h1>把那些虚掩着的门，轻轻关上。</h1>
-      <p class="en-tagline">See what your tools left running on localhost, and gently close them.</p>
-
-      <div class="install-box">
-        <div class="install-cmd">
-          <span class="prefix">$ </span>brew install --cask songhaifan/tap/leftopen
+    <main>
+      <section class="hero" style="border-top:0">
+        <div>
+          <h1>把那些虚掩着的门，<br>轻轻关上。</h1>
+          <p class="en">See what your tools left running on localhost — which project, which process, how long — and gently close them.</p>
+          <div class="install">
+            <code><span class="p">$ </span>brew install --cask songhaifan/tap/leftopen</code>
+            <button id="copy" type="button" aria-label="复制安装命令">复制</button>
+          </div>
+          <p class="alt">或者下载 <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.0)</a>，解压后拖进「应用程序」。</p>
+          <div class="badges">
+            <span>macOS 14+</span><span>Apple 公证</span><span>原生 SwiftUI</span><span>MIT</span>
+          </div>
         </div>
-        <button class="copy-btn" id="copyBtn" onclick="copyInstallCmd()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-          <span id="copyBtnText">复制</span>
-        </button>
-      </div>
+        <figure class="shot">
+          <img src="assets/preview.png" width="431" height="516" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起">
+        </figure>
+      </section>
 
-      <div class="download-sub">
-        <span>或下载安装包：</span>
-        <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.0)</a>
-      </div>
-
-      <div class="showcase">
-        <div class="showcase-frame">
-          <img src="assets/preview.jpg" alt="LeftOpen 菜单栏界面预览">
+      <section id="sees">
+        <p class="kicker">它看到什么</p>
+        <div class="sees">
+          <div class="item">
+            <span class="n">01</span>
+            <div>
+              <h3>端口属于哪个项目</h3>
+              <p>沿工作目录向上找 <code>.git</code>、<code>package.json</code>、<code>pyproject.toml</code>、<code>Cargo.toml</code>、<code>go.mod</code>；全局 npm 包、<code>python -m</code> 模块、Redis / Postgres / Ollama 这类独立服务也按名字识别，不再只是一个 <code>node</code>。</p>
+            </div>
+          </div>
+          <div class="item">
+            <span class="n">02</span>
+            <div>
+              <h3>真实图标，不预存</h3>
+              <p>先取 .app 自带图标；再找项目或包自己带的（Tauri / Electron app icon、<code>index.html</code> 声明的 favicon、<code>public/</code> 约定）；最后向本机服务器抓 favicon。LeftOpen 自己不打包任何第三方图标。</p>
+            </div>
+          </div>
+          <div class="item">
+            <span class="n">03</span>
+            <div>
+              <h3>先看该关的</h3>
+              <p>可关闭的端口排在最前，系统服务和 app 折叠收起。菜单栏用门的开合告诉你还有没有服务开着，每一行都标着它已经跑了多久。</p>
+            </div>
+          </div>
+          <div class="item">
+            <span class="n">04</span>
+            <div>
+              <h3>谁在局域网可见</h3>
+              <p>区分只绑在 <code>127.0.0.1</code> 的端口和绑在 <code>0.0.0.0</code> / 局域网 IP 上的端口，开发接口意外暴露时一眼能看到。</p>
+            </div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="story-section">
-      <div class="story-card">
-        <div class="story-label">Origin</div>
-        <p>当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。</p>
-        <p>现有工具要么太复杂，要么只能告诉你“端口被占用”，却说不清它到底属于哪个进程、可能来自哪个项目。</p>
-        <p>所以我做了 LeftOpen。它安静地待在菜单栏里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。</p>
-        <p>“把那些虚掩着的门，轻轻关上。”</p>
-      </div>
-    </section>
-
-    <section class="features-section">
-      <div class="features-grid">
-        <div class="feature-card">
-          <h3>工程归属推断</h3>
-          <p>解析 .git、package.json、pyproject.toml 与应用 Bundle，精准还原监听背后的真实项目，告别千篇一律的 node 或 python。</p>
+      <section id="restraint">
+        <p class="kicker">它不做什么</p>
+        <div class="restraint">
+          <p class="lede">关门的动作要轻。LeftOpen 只做请求，不做强迫，也不替你判断。</p>
+          <ul class="rules">
+            <li><b>只发 SIGTERM</b><span>请进程自己清理退出。不 <code>kill -9</code>，不杀进程树，没有「强制」按钮。</span></li>
+            <li><b>关前校验</b><span>关闭瞬间重新核对 PID 与启动时间，进程已换人就不动手；先列出同一进程的其他端口再让你确认。</span></li>
+            <li><b>不碰系统和 app</b><span>操作系统进程、别人的 <code>.app</code>、不属于你的用户——拒绝关闭，只展示。</span></li>
+            <li><b>零常驻，零遥测</b><span>没有守护进程、LaunchAgent 或网络上报。只在面板打开和每分钟一次的刷新时做本地只读扫描。</span></li>
+          </ul>
         </div>
+      </section>
 
-        <div class="feature-card">
-          <h3>克制温和关闭</h3>
-          <p>完整预览关联端口，关闭前二次校验进程身份与启动时间；仅发送 SIGTERM 礼貌退出，不擅自升级为暴力 kill。</p>
+      <section id="origin">
+        <p class="kicker">为什么做它</p>
+        <div class="origin">
+          <p>当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。</p>
+          <p>现有工具要么太复杂，要么只能告诉你「端口被占用」，却说不清它到底属于哪个进程、可能来自哪个项目。</p>
+          <p>所以我做了 LeftOpen。它安静地待在菜单栏里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。</p>
+          <p class="sig">把那些虚掩着的门，轻轻关上。</p>
         </div>
+      </section>
 
-        <div class="feature-card">
-          <h3>局域网暴露警示</h3>
-          <p>清晰识别监听地址是仅限本机（127.0.0.1）还是公开至局域网（0.0.0.0 或 LAN IP），防范开发接口意外暴露。</p>
-        </div>
-
-        <div class="feature-card">
-          <h3>原生零常驻</h3>
-          <p>纯原生 SwiftUI MenuBarExtra 构建。零后台守护进程、零遥测收集、无 Dock 驻留，常驻菜单栏即点即开。</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="terminal-section">
-      <div class="terminal-header">
-        <span>terminal</span>
-        <span>leftopen</span>
-      </div>
-      <div class="terminal-body">
-        <pre><code><span class="subtle">$</span> <span class="cmd">leftopen list</span>
-
-LEFT OPEN
+      <section id="cli">
+        <p class="kicker">终端里也一样</p>
+        <div class="cli">
+          <div>
+            <p>App 里附带同一个引擎的命令行版本，装好就能用。归属推断、关闭前的校验、只发 SIGTERM——规则完全一致。</p>
+            <ul class="cmds">
+              <li><code>leftopen</code><span>列出所有监听端口与归属</span></li>
+              <li><code>leftopen 3000</code><span>解释这个端口是谁的</span></li>
+              <li><code>leftopen open 3000</code><span>在浏览器打开 localhost:3000</span></li>
+              <li><code>leftopen close 3000</code><span>请它退出（SIGTERM，先确认）</span></li>
+              <li><code>leftopen --json</code><span>给脚本和 agent 用的结构化输出</span></li>
+            </ul>
+          </div>
+          <div class="term"><pre><span class="d">$</span> leftopen
+<span class="h">LEFT OPEN</span>
 26 listening ports · 17 processes · 1 projects · 8 LAN-visible
 
-MY PROJECTS (2)
-PORT    PID      OWNER          PROCESS    SCOPE
-5173    76344    visdelta       node       LOCAL
-         ↳ ~/Documents/visdelta
-5511    4999     visdelta       node       LOCAL
-         ↳ ~/Documents/visdelta
+<span class="h">MY PROJECTS</span> <span class="d">(2)</span>
+<span class="d">PORT    PID      OWNER          PROCESS    AGE      SCOPE</span>
+5173    76344    visdelta       node       2h       LOCAL
+<span class="d">         ↳ ~/Documents/visdelta</span>
+5511    4999     visdelta       node       27m      LOCAL
+<span class="d">         ↳ ~/Documents/visdelta</span>
 
-APPLICATIONS (16)
-PORT    PID      OWNER          PROCESS    SCOPE
-5000    696      ControlCenter  Control    LAN
-9222    36824    Google Chrome  Chrome     LOCAL
+<span class="h">SERVICES</span> <span class="d">(3)</span>
+<span class="d">PORT    PID      OWNER          PROCESS    AGE      SCOPE</span>
+11434   911      Ollama         ollama     1d       LOCAL
+8384    1231     Syncthing      syncthing  1d       <span class="lan">LAN</span>
 
-LOCAL = this Mac only · LAN = may be reachable from your local network</code></pre>
-      </div>
-    </section>
+<span class="h">APPLICATIONS</span> <span class="d">(16)</span>
+<span class="d">PORT    PID      OWNER          PROCESS    AGE      SCOPE</span>
+5000    696      ControlCenter  Control    3d       <span class="lan">LAN</span>
+9222    36824    Google Chrome  Chrome     5h       LOCAL
 
-    <section class="faq-section">
-      <div class="faq-item">
-        <h3>为什么不做一键暴力 Kill？</h3>
-        <p>后台服务可能持有未写入数据库的数据。LeftOpen 坚持通过 SIGTERM 请求进程自行清理退出，关闭前还会呈现共享端口，避免误连带其它服务。</p>
-      </div>
+<span class="d">LOCAL = this Mac only
+LAN   = may be reachable from your local network</span></pre></div>
+        </div>
+      </section>
 
-      <div class="faq-item">
-        <h3>后台是否有常驻守护进程？</h3>
-        <p>没有。LeftOpen 不注册 LaunchDaemon / LaunchAgent，也不启动网络服务，仅在面板唤起与定时刷新时执行本地只读扫描。</p>
-      </div>
+      <section id="faq">
+        <p class="kicker">常见问题</p>
+        <div class="faq">
+          <div>
+            <h3>为什么不做一键强杀？</h3>
+            <p>服务可能还握着没写盘的数据。SIGTERM 给它一个体面退出的机会；真要强杀，你在终端里 <code>kill -9</code> 只需要一秒，不必由 LeftOpen 替你决定。</p>
+          </div>
+          <div>
+            <h3>图标是从哪来的？</h3>
+            <p>全部来自你这台 Mac 上已有的东西：.app、项目仓库、npm 包目录，或本机服务器自己提供的 favicon。找不到就用一个符号，不会去网上下载。</p>
+          </div>
+          <div>
+            <h3>安全与公证</h3>
+            <p>由 Apple Developer ID 签名并经 Apple 公证装订，macOS Sonoma 上下载即可打开。源码 MIT 开源，Homebrew cask 的校验和与 Release 一一对应。</p>
+          </div>
+        </div>
+      </section>
+    </main>
 
-      <div class="faq-item">
-        <h3>安全与公证</h3>
-        <p>应用由 Apple 开发者身份签名，并已通过 Apple Notary Service 官方公证装订，在 macOS Sonoma 上下载即可直接打开。</p>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <div class="footer-content">
-      <div>LeftOpen — 把那些虚掩着的门，轻轻关上。</div>
-      <div>
-        <a href="https://github.com/SonghaiFan/leftopen" target="_blank" rel="noopener">GitHub</a> ·
-        <a href="https://github.com/SonghaiFan/leftopen/releases/latest" target="_blank" rel="noopener">Releases</a> ·
-        <a href="https://github.com/SonghaiFan/leftopen/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
-      </div>
-    </div>
-  </footer>
+    <footer>
+      <span>把那些虚掩着的门，轻轻关上。</span>
+      <nav>
+        <a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
+        <a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a>
+        <a href="https://github.com/SonghaiFan/leftopen/blob/main/LICENSE">MIT License</a>
+      </nav>
+    </footer>
+  </div>
 
   <script>
-    function copyInstallCmd() {
-      const text = 'brew install --cask songhaifan/tap/leftopen';
-      navigator.clipboard.writeText(text).then(() => {
-        const btnText = document.getElementById('copyBtnText');
-        const original = btnText.innerText;
-        btnText.innerText = '已复制';
-        setTimeout(() => {
-          btnText.innerText = original;
-        }, 2000);
+    document.getElementById('copy').addEventListener('click', function () {
+      var btn = this;
+      navigator.clipboard.writeText('brew install --cask songhaifan/tap/leftopen').then(function () {
+        btn.textContent = '已复制';
+        setTimeout(function () { btn.textContent = '复制'; }, 1800);
       });
-    }
+    });
   </script>
 </body>
 </html>

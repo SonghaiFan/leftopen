@@ -14,7 +14,7 @@
   </p>
 
   <br />
-  <img src="assets/preview.jpg" alt="LeftOpen macOS Menu Bar App" width="700" style="border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.1);" />
+  <img src="assets/preview.png" alt="LeftOpen menu bar panel: closable ports first, apps and system services folded away" width="431" />
   <br /><br />
 </div>
 
