@@ -14,7 +14,10 @@
   </p>
 
   <br />
-  <img src="assets/preview.png" alt="LeftOpen menu bar panel: closable ports first, apps and system services folded away" width="431" />
+  <picture>
+    <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
+    <img src="assets/preview.png" alt="LeftOpen menu bar panel: closable ports first, apps and system services folded away" width="375" />
+  </picture>
   <br /><br />
 </div>
 

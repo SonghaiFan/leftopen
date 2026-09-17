@@ -9,8 +9,13 @@ struct MenuPanel: View {
     @State private var selectedProcessPID: Int32?
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
-    @State private var protectedExpanded = false
+    @State private var protectedExpanded: Bool
     @FocusState private var searchFocused: Bool
+
+    init(model: MenuModel, protectedExpanded: Bool = false) {
+        self.model = model
+        _protectedExpanded = State(initialValue: protectedExpanded)
+    }
 
     private var selectedActivity: Activity? {
         model.snapshot.activities.first { $0.id == model.selectedActivityID }

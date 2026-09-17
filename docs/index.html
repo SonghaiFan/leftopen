@@ -109,7 +109,7 @@
     .hero .badges span::before { content: "·"; margin-right: 10px; color: var(--line-strong); }
     .hero .badges span:first-child::before { content: none; }
 
-    .shot { width: min(100%, 440px); margin-top: 72px; }
+    .shot { width: min(100%, 375px); margin-top: 72px; }
     .shot img {
       display: block; width: 100%; height: auto;
       border-radius: 16px; box-shadow: var(--shadow-panel);
@@ -185,7 +185,7 @@
     @media (max-width: 820px) {
       .hero { padding: 40px 0 72px; }
       .hero .en { font-size: 18px; }
-      .shot { margin-top: 48px; width: min(100%, 380px); }
+      .shot { margin-top: 48px; width: min(100%, 340px); }
       section { padding: 72px 0; }
       .sees, .restraint, .faq { grid-template-columns: 1fr; gap: 40px; }
       .restraint .lede { font-size: 28px; }
@@ -222,7 +222,10 @@
           </div>
         </div>
         <figure class="shot">
-          <img src="assets/preview.png" width="431" height="516" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起">
+          <picture>
+            <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
+            <img src="assets/preview.png" width="375" height="460" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起">
+          </picture>
         </figure>
       </section>
 

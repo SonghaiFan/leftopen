@@ -123,6 +123,10 @@ final class MenuModel: ObservableObject {
 struct LeftOpenApp: App {
     @StateObject private var model = MenuModel()
 
+    init() {
+        PanelSnapshot.runIfRequested(model: MenuModel())
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuPanel(model: model)
