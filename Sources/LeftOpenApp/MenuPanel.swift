@@ -6,7 +6,7 @@ struct MenuPanel: View {
     @ObservedObject var model: MenuModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var query = ""
-    @State private var selectedProcessPID: Int32?
+    @State private var selectedGroupID: String?
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
     @State private var protectedExpanded: Bool
@@ -54,9 +54,9 @@ struct MenuPanel: View {
     private var protectedGroups: [ListenerGroup] { listenerGroups(from: protectedActivities) }
 
     private var selectedProcessGroup: ListenerGroup? {
-        guard let selectedProcessPID else { return nil }
+        guard let selectedGroupID else { return nil }
         return listenerGroups(from: model.snapshot.activities)
-            .first { $0.primary.process.pid == selectedProcessPID }
+            .first { $0.id == selectedGroupID }
     }
 
     var body: some View {
@@ -70,7 +70,7 @@ struct MenuPanel: View {
                 detailView(activity)
             } else if let group = selectedProcessGroup {
                 processDetailView(group)
-            } else if model.selectedActivityID != nil || selectedProcessPID != nil {
+            } else if model.selectedActivityID != nil || selectedGroupID != nil {
                 vanishedView
             } else {
                 listView
@@ -79,24 +79,20 @@ struct MenuPanel: View {
             footer
         }
         .frame(width: 375, height: 460)
-        .background(panelBackground)
+        .background(colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor))
         .task { await model.refresh() }
-    }
-
-    private var panelBackground: Color {
-        Color(nsColor: colorScheme == .dark ? .textBackgroundColor : .windowBackgroundColor)
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            if model.pendingPlan != nil || model.selectedActivityID != nil || selectedProcessPID != nil {
+            if model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
                 Button {
                     if model.pendingPlan != nil {
                         model.pendingPlan = nil
                     } else if model.selectedActivityID != nil {
                         model.selectedActivityID = nil
                     } else {
-                        selectedProcessPID = nil
+                        selectedGroupID = nil
                     }
                 } label: {
                     Image(systemName: "chevron.left")
@@ -109,7 +105,7 @@ struct MenuPanel: View {
             DoorMark(isOpen: model.hasOpenDoors)
                 .frame(width: 18, height: 30)
                 .accessibilityHidden(true)
-            if model.pendingPlan != nil || model.selectedActivityID != nil || selectedProcessPID != nil {
+            if model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
                 Text("LeftOpen").font(.headline)
             } else {
                 VStack(alignment: .leading, spacing: 3) {
@@ -292,7 +288,7 @@ struct MenuPanel: View {
                     if group.ports.count == 1 {
                         model.selectedActivityID = group.primary.id
                     } else {
-                        selectedProcessPID = group.primary.process.pid
+                        selectedGroupID = group.id
                     }
                 } label: {
                     PortRow(group: group)
@@ -316,12 +312,17 @@ struct MenuPanel: View {
         var groups: [String: [Activity]] = [:]
         var orderedIDs: [String] = []
         for activity in activities {
-            let id = "\(activity.process.pid):\(activity.process.executablePath ?? activity.process.command)"
+            let id: String
+            if let bundle = activity.applicationBundle {
+                id = "app:\(bundle.path)"
+            } else {
+                id = "pid:\(activity.process.pid):\(activity.process.executablePath ?? activity.process.command)"
+            }
             if groups[id] == nil { orderedIDs.append(id) }
             groups[id, default: []].append(activity)
         }
         return orderedIDs.compactMap { id in
-            groups[id].map(ListenerGroup.init)
+            groups[id].map { ListenerGroup(id: id, activities: $0) }
         }
     }
 
@@ -477,7 +478,11 @@ struct MenuPanel: View {
                         Text(group.primary.inference.label)
                             .font(.title3.weight(.semibold))
                         HStack(spacing: 6) {
-                            Text("PID \(group.primary.process.pid) · \(group.ports.count) listening ports")
+                            if group.pids.count > 1 {
+                                Text("\(group.pids.count) processes · \(group.ports.count) listening ports")
+                            } else {
+                                Text("PID \(group.primary.process.pid) · \(group.ports.count) listening ports")
+                            }
                             if let uptime = group.primary.process.uptime {
                                 Text("•")
                                 Text("Up \(uptime)")
@@ -504,12 +509,26 @@ struct MenuPanel: View {
                                 .frame(width: 54, alignment: .leading)
                             ProcessIconView(activity: activity, size: 18)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(activity.listener.addresses.joined(separator: ", "))
-                                    .font(.callout)
-                                    .lineLimit(1)
-                                Text(activity.scope == .lan ? "LAN-facing" : "Local only")
+                                if group.pids.count > 1 {
+                                    Text(activity.process.command + " (PID \(activity.process.pid))")
+                                        .font(.callout)
+                                        .fontWeight(.medium)
+                                        .lineLimit(1)
+                                    HStack(spacing: 4) {
+                                        Text(activity.listener.addresses.joined(separator: ", "))
+                                        Text("•")
+                                        Text(activity.scope == .lan ? "LAN-facing" : "Local only")
+                                    }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                } else {
+                                    Text(activity.listener.addresses.joined(separator: ", "))
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    Text(activity.scope == .lan ? "LAN-facing" : "Local only")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right")
@@ -704,13 +723,17 @@ struct MenuPanel: View {
 }
 
 private struct ListenerGroup: Identifiable {
+    let id: String
     let activities: [Activity]
 
-    init(_ activities: [Activity]) { self.activities = activities }
+    init(id: String, activities: [Activity]) {
+        self.id = id
+        self.activities = activities
+    }
 
-    var id: String { "\(primary.process.pid):\(ports.map(String.init).joined(separator: ","))" }
     var primary: Activity { activities[0] }
     var ports: [Int] { Array(Set(activities.map(\.listener.port))).sorted() }
+    var pids: [Int32] { Array(Set(activities.map(\.process.pid))).sorted() }
     var scope: ListenerScope { activities.contains { $0.scope == .lan } ? .lan : .local }
 }
 
@@ -740,12 +763,19 @@ private struct PortRow: View {
                 Text(group.primary.inference.label)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
-                Text(group.primary.inference.label == group.primary.process.command
-                    ? "PID \(group.primary.process.pid)"
-                    : "\(group.primary.process.command) · PID \(group.primary.process.pid)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if group.pids.count > 1 {
+                    Text("\(group.pids.count) processes · \(group.ports.count) ports")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text(group.primary.inference.label == group.primary.process.command
+                        ? "PID \(group.primary.process.pid)"
+                        : "\(group.primary.process.command) · PID \(group.primary.process.pid)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if group.ports.count > 1 {
