@@ -42,6 +42,9 @@ final class MenuModel: ObservableObject {
     @Published var lastRefresh: Date?
 
     var portCount: Int { snapshot.portCount }
+    var projectPortCount: Int { snapshot.projectPortCount }
+    var closablePortCount: Int { snapshot.closablePortCount }
+    var hasOpenDoors: Bool { snapshot.hasOpenDoors }
 
     init() {
         Task {
@@ -125,14 +128,30 @@ struct LeftOpenApp: App {
             MenuPanel(model: model)
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: model.notice?.kind == .error ? "exclamationmark.triangle" : "network")
-                Text(model.notice?.kind == .error && model.lastRefresh == nil ? "?" : String(model.portCount))
-                    .monospacedDigit()
+                if model.notice?.kind == .error {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text(model.lastRefresh == nil ? "?" : String(model.portCount))
+                        .monospacedDigit()
+                } else if model.hasOpenDoors {
+                    Image(systemName: "door.left.hand.open")
+                    Text(String(model.closablePortCount))
+                        .monospacedDigit()
+                } else {
+                    Image(systemName: "door.left.hand.closed")
+                }
             }
-            .accessibilityLabel(model.notice?.kind == .error
-                ? "LeftOpen scan failed; \(model.portCount) last known listening ports"
-                : "LeftOpen, \(model.portCount) listening ports")
+            .accessibilityLabel(accessibilityLabel)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    private var accessibilityLabel: String {
+        if model.notice?.kind == .error {
+            return "LeftOpen scan failed; \(model.portCount) last known listening ports"
+        }
+        if model.hasOpenDoors {
+            return "LeftOpen, \(model.closablePortCount) open dev ports, \(model.portCount) total ports"
+        }
+        return "LeftOpen, all doors closed, 0 dev servers running"
     }
 }
