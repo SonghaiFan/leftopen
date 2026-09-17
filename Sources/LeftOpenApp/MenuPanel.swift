@@ -10,6 +10,7 @@ struct MenuPanel: View {
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
     @State private var protectedExpanded = false
+    @FocusState private var searchFocused: Bool
 
     private var selectedActivity: Activity? {
         model.snapshot.activities.first { $0.id == model.selectedActivityID }
@@ -142,6 +143,7 @@ struct MenuPanel: View {
                     }
                 }
                 .buttonStyle(.borderless)
+                .focusable(false)
                 .accessibilityLabel("Refresh listening ports")
                 .help("Refresh now (⌘R)")
                 .keyboardShortcut("r", modifiers: .command)
@@ -173,6 +175,8 @@ struct MenuPanel: View {
                 TextField("Search port, process, or PID", text: $query)
                     .textFieldStyle(.plain)
                     .font(.callout)
+                    .focused($searchFocused)
+                    .onAppear { searchFocused = true }
                     .accessibilityLabel("Search listening ports")
                 if !query.isEmpty {
                     Button {
