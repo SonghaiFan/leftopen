@@ -45,7 +45,7 @@ export LEFTOPEN_OUTPUT_DIR="dist/v${NEW_VERSION}"
 Confirm git state is clean and existing tests pass:
 
 ```bash
-cd /Users/songhaifan/Documents/LeftOpen/leftopen
+cd "$(git rev-parse --show-toplevel)"
 
 # Verify git working tree is clean
 git status
@@ -174,11 +174,10 @@ gh release create "v${NEW_VERSION}" LeftOpen.zip \
 
 Update the Cask formula in `songhaifan/homebrew-tap`:
 
-1. Locate or clone the tap repository:
+1. Clone the tap repository into a scratch directory:
    ```bash
-   TAP_DIR="${HOME}/.gemini/antigravity/brain/4b062e84-6d53-4055-9932-ae71712db835/scratch/homebrew-tap"
-   # Or clone if not present:
-   # git clone https://github.com/SonghaiFan/homebrew-tap.git "$TAP_DIR"
+   TAP_DIR="$(mktemp -d)/homebrew-tap"
+   git clone https://github.com/SonghaiFan/homebrew-tap.git "$TAP_DIR"
    ```
 
 2. Update `Casks/leftopen.rb` with the new version and SHA-256:
