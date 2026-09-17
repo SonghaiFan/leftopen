@@ -46,7 +46,9 @@ brew install --cask songhaifan/tap/leftopen
 
 ## 核心设计 (Design & Features)
 
-- **工程归属推断**：解析 `.git`、`package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod` 与 `.app` 真实目录，不再显示无意义的 `node` 或 `python`。
+- **工程归属推断**：解析 `.git`、`package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod` 与 `.app` 真实目录，不再显示无意义的 `node` 或 `python`；全局 npm 包、`python -m` 模块和 Redis / Postgres / Ollama 等独立服务也能按名字识别。
+- **真实图标，不预存**：优先取 `.app` 自带图标，其次是项目或 npm 包自己带的图标（Tauri / Electron app icon、`index.html` 声明的 favicon、`public/` 约定），再从本机服务器抓 favicon，最后才用符号兜底。
+- **先看该关的**：列表把可关闭的端口排在前面，app 与系统服务折叠收起；菜单栏图标用门的开合表示是否还有开着的服务，并显示每个进程已运行多久。
 - **克制温和关闭**：关闭前显示关联端口预览；关闭瞬间校验 PID 与启动时间防误杀；仅发送 `SIGTERM` 礼貌退出，绝不擅自 `SIGKILL`，拒绝越权关闭系统进程。
 - **LAN 暴露区分**：自动标识端口是仅绑定回环地址（`127.0.0.1`），还是向局域网公开（`0.0.0.0` / LAN IP）。
 - **零后台常驻**：纯原生 SwiftUI `MenuBarExtra`。无守护进程，无 Dock 栏图标，无网络遥测，打开即用。
@@ -65,6 +67,9 @@ leftopen
 # 查看指定端口详情
 leftopen 3000
 
+# 在默认浏览器打开 http://localhost:3000
+leftopen open 3000
+
 # 安全关闭指定端口（SIGTERM，提示确认）
 leftopen close 3000
 
@@ -78,16 +83,20 @@ LEFT OPEN
 26 listening ports · 17 processes · 1 projects · 8 LAN-visible
 
 MY PROJECTS (2)
-PORT    PID      OWNER          PROCESS    SCOPE
-5173    76344    visdelta       node       LOCAL
+PORT    PID      OWNER          PROCESS    AGE      SCOPE
+5173    76344    visdelta       node       2h       LOCAL
          ↳ ~/Documents/visdelta
-5511    4999     visdelta       node       LOCAL
+5511    4999     visdelta       node       27m      LOCAL
          ↳ ~/Documents/visdelta
 
 APPLICATIONS (16)
-PORT    PID      OWNER          PROCESS    SCOPE
-5000    696      ControlCenter  Control    LAN
-9222    36824    Google Chrome  Chrome     LOCAL
+PORT    PID      OWNER          PROCESS    AGE      SCOPE
+5000    696      ControlCenter  Control    3d       LAN
+9222    36824    Google Chrome  Chrome     5h       LOCAL
+
+SERVICES (3)
+PORT    PID      OWNER          PROCESS    AGE      SCOPE
+11434   911      Ollama         ollama     1d       LOCAL
 
 LOCAL = this Mac only · LAN = may be reachable from your local network
 ```
