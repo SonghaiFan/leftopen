@@ -8,6 +8,7 @@ public enum ListenerScope: String, Sendable {
 public enum OwnerCategory: String, Sendable {
     case project
     case application
+    case service
     case systemService = "system-service"
     case unknown
 }
@@ -38,8 +39,11 @@ public struct ProcessFact: Sendable, Equatable {
     public let uid: Int32?
     public let user: String?
     public let cwd: String?
+    public let uptime: String?
+    public let rawElapsedTime: String?
+    public let arguments: String?
 
-    public init(pid: Int32, ppid: Int32?, command: String, executablePath: String?, uid: Int32?, user: String?, cwd: String?) {
+    public init(pid: Int32, ppid: Int32?, command: String, executablePath: String?, uid: Int32?, user: String?, cwd: String?, uptime: String? = nil, rawElapsedTime: String? = nil, arguments: String? = nil) {
         self.pid = pid
         self.ppid = ppid
         self.command = command
@@ -47,6 +51,9 @@ public struct ProcessFact: Sendable, Equatable {
         self.uid = uid
         self.user = user
         self.cwd = cwd
+        self.uptime = uptime
+        self.rawElapsedTime = rawElapsedTime
+        self.arguments = arguments
     }
 }
 
@@ -95,6 +102,18 @@ public struct ScanSnapshot: Sendable {
     public var portCount: Int { Set(activities.map(\.listener.port)).count }
     public var lanPortCount: Int {
         Set(activities.filter { $0.scope == .lan }.map(\.listener.port)).count
+    }
+    public var projectPortCount: Int {
+        Set(activities.filter { $0.inference.category == .project }.map(\.listener.port)).count
+    }
+    public var closableActivities: [Activity] {
+        activities.filter { CloseService.protectionReason(for: $0) == nil }
+    }
+    public var closablePortCount: Int {
+        Set(closableActivities.map(\.listener.port)).count
+    }
+    public var hasOpenDoors: Bool {
+        closablePortCount > 0
     }
 }
 

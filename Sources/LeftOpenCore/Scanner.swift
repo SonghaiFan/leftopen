@@ -34,6 +34,108 @@ enum CommandRunner {
     }
 }
 
+public enum UptimeFormatter {
+    public static func format(etime: String, compact: Bool = false) -> String? {
+        let trimmed = etime.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        var days = 0
+        var remaining = trimmed
+
+        if let dashIndex = remaining.firstIndex(of: "-") {
+            let dayStr = remaining[..<dashIndex]
+            guard let d = Int(dayStr) else { return nil }
+            days = d
+            remaining = String(remaining[remaining.index(after: dashIndex)...])
+        }
+
+        let timeParts = remaining.split(separator: ":").compactMap { Int($0) }
+        guard !timeParts.isEmpty else { return nil }
+
+        let hours: Int
+        let minutes: Int
+
+        switch timeParts.count {
+        case 2: // mm:ss
+            hours = 0
+            minutes = timeParts[0]
+        case 3: // hh:mm:ss
+            hours = timeParts[0]
+            minutes = timeParts[1]
+        default:
+            return nil
+        }
+
+        if compact {
+            if days > 0 {
+                return "\(days)d"
+            } else if hours > 0 {
+                return "\(hours)h"
+            } else if minutes > 0 {
+                return "\(minutes)m"
+            } else {
+                return "< 1m"
+            }
+        }
+
+        if days > 0 {
+            return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
+        } else if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        } else if minutes > 0 {
+            return "\(minutes)m"
+        } else {
+            return "< 1m"
+        }
+    }
+}
+
+extension ProcessFact {
+    public var compactUptime: String? {
+        guard let rawElapsedTime else { return uptime }
+        return UptimeFormatter.format(etime: rawElapsedTime, compact: true) ?? uptime
+    }
+}
+
+/// Finds the npm package a process was launched from by looking for `/node_modules/<pkg>/`
+/// in its executable path or launch arguments. Indirection directories (`.bin`, `.pnpm`) are
+/// skipped and the innermost real package wins, so pnpm layouts resolve to the actual package.
+public enum NodePackageLocator {
+    public struct Package: Equatable, Sendable {
+        public let name: String
+        public let directory: String
+    }
+
+    public static func locate(inArguments arguments: String) -> Package? {
+        for token in arguments.split(whereSeparator: \.isWhitespace) {
+            if let found = locate(inPath: String(token)) { return found }
+        }
+        return nil
+    }
+
+    public static func locate(inPath path: String, resolvingSymlinks: Bool = true) -> Package? {
+        var searchRange = path.startIndex..<path.endIndex
+        var best: Package?
+        while let range = path.range(of: "/node_modules/", range: searchRange) {
+            let segments = path[range.upperBound...].split(separator: "/", omittingEmptySubsequences: false)
+            if let first = segments.first, !first.isEmpty, !first.hasPrefix(".") {
+                var name = String(first)
+                if first.hasPrefix("@"), segments.count > 1, !segments[1].isEmpty {
+                    name += "/" + segments[1]
+                }
+                best = Package(name: name, directory: String(path[..<range.upperBound]) + name)
+            }
+            searchRange = range.upperBound..<path.endIndex
+        }
+        if best == nil, resolvingSymlinks, path.contains("/node_modules/.bin/"), path.hasPrefix("/") {
+            // `.bin/next` is a symlink into the real package; follow it once.
+            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            if resolved != path { return locate(inPath: resolved, resolvingSymlinks: false) }
+        }
+        return best
+    }
+}
+
 public enum Scanner {
     public static func parseListeners(_ output: String) -> [Listener] {
         var pid: Int32?
@@ -97,10 +199,11 @@ public enum Scanner {
         let pids = Array(Set(listeners.map(\.pid))).sorted()
         let cwdByPID = try descriptorFacts(pids, "cwd")
         let executableByPID = try descriptorFacts(pids, "txt")
+        let argumentsByPID = commandArguments(pids)
         var limitations: [String] = []
         let processTable: [Int32: ProcessFact]
         do {
-            processTable = parseProcessTable(try CommandRunner.output("/bin/ps", ["-axo", "pid=,ppid=,comm="]))
+            processTable = parseProcessTable(try CommandRunner.output("/bin/ps", ["-axo", "pid=,ppid=,etime=,comm="]))
         } catch {
             processTable = [:]
             limitations.append("The process table was unavailable; parent evidence is incomplete.")
@@ -114,7 +217,9 @@ public enum Scanner {
             let table = processTable[listener.pid]
             let process = ProcessFact(pid: listener.pid, ppid: table?.ppid, command: listener.command,
                 executablePath: executableByPID[listener.pid] ?? table?.executablePath,
-                uid: listener.uid, user: listener.user, cwd: cwdByPID[listener.pid])
+                uid: listener.uid, user: listener.user, cwd: cwdByPID[listener.pid],
+                uptime: table?.uptime, rawElapsedTime: table?.rawElapsedTime,
+                arguments: argumentsByPID[listener.pid])
             let parents = parentChain(for: process, in: processTable)
             let project = process.cwd.flatMap { projects[$0] }
             let bundle = applicationBundle(for: process, parents: parents)
@@ -124,6 +229,25 @@ public enum Scanner {
                 scope: listenerScope(listener.addresses), inference: inference)
         }
         return ScanSnapshot(activities: activities, limitations: limitations)
+    }
+
+    private static func commandArguments(_ pids: [Int32]) -> [Int32: String] {
+        guard !pids.isEmpty else { return [:] }
+        var results: [Int32: String] = [:]
+        for start in stride(from: 0, to: pids.count, by: 100) {
+            let chunk = pids[start..<min(start + 100, pids.count)]
+            let pidArgs = chunk.map(String.init).joined(separator: ",")
+            if let output = try? CommandRunner.output("/bin/ps", ["-ww", "-p", pidArgs, "-o", "pid=,command="]) {
+                for line in output.split(whereSeparator: \.isNewline) {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard let firstSpace = trimmed.firstIndex(where: \.isWhitespace),
+                          let pid = Int32(trimmed[..<firstSpace]) else { continue }
+                    let args = trimmed[firstSpace...].trimmingCharacters(in: .whitespaces)
+                    results[pid] = args
+                }
+            }
+        }
+        return results
     }
 
     private static func descriptorFacts(_ pids: [Int32], _ descriptor: String) throws -> [Int32: String] {
@@ -146,16 +270,26 @@ public enum Scanner {
         return results
     }
 
-    private static func parseProcessTable(_ output: String) -> [Int32: ProcessFact] {
+    static func parseProcessTable(_ output: String) -> [Int32: ProcessFact] {
         var table: [Int32: ProcessFact] = [:]
         for line in output.split(whereSeparator: \.isNewline) {
             let pieces = line.split(whereSeparator: \.isWhitespace)
             guard pieces.count >= 3, let pid = Int32(pieces[0]), let ppid = Int32(pieces[1]) else { continue }
-            let rawCommand = pieces.dropFirst(2).joined(separator: " ")
+            let etime: String?
+            let rawCommand: String
+            if pieces.count >= 4 && (pieces[2].contains(":") || pieces[2].contains("-")) {
+                etime = String(pieces[2])
+                rawCommand = pieces.dropFirst(3).joined(separator: " ")
+            } else {
+                etime = nil
+                rawCommand = pieces.dropFirst(2).joined(separator: " ")
+            }
             let executable = rawCommand.hasPrefix("/") ? rawCommand : nil
             let command = executable.map { URL(fileURLWithPath: $0).lastPathComponent } ?? rawCommand
+            let uptime = etime.flatMap { UptimeFormatter.format(etime: $0) }
             table[pid] = ProcessFact(pid: pid, ppid: ppid, command: command,
-                executablePath: executable, uid: nil, user: nil, cwd: nil)
+                executablePath: executable, uid: nil, user: nil, cwd: nil,
+                uptime: uptime, rawElapsedTime: etime)
         }
         return table
     }
@@ -212,8 +346,136 @@ public enum Scanner {
                 category: .systemService, confidence: "high",
                 reason: "Executable path \(path) is in an operating-system-managed location.")
         }
+        if let interpreter = inferInterpreterOwner(process: process) {
+            return interpreter
+        }
+        if let service = inferStandaloneService(process: process) {
+            return service
+        }
+        if let path = process.executablePath, isUserInstalledExecutable(path) {
+            let binaryName = URL(fileURLWithPath: path).lastPathComponent
+            let humanLabel = formatBinaryName(binaryName)
+            return OwnerInference(label: humanLabel, category: .service, confidence: "medium",
+                reason: "Executable \(path) is a user-installed binary.")
+        }
         return OwnerInference(label: "Unknown", category: .unknown, confidence: "none",
             reason: "No accepted project marker, application bundle, or system executable path established an owner.")
+    }
+
+    private static func inferInterpreterOwner(process: ProcessFact) -> OwnerInference? {
+        let cmd = process.command.lowercased()
+        let generic = ["node", "bun", "deno", "ts-node", "ruby", "perl"]
+        guard generic.contains(cmd) || cmd.hasPrefix("python") else { return nil }
+
+        // Check launch arguments for global npm package or python module
+        if let args = process.arguments {
+            if let package = NodePackageLocator.locate(inArguments: args) {
+                let humanLabel = formatBinaryName(package.name)
+                return OwnerInference(label: humanLabel, category: .service, confidence: "high",
+                    reason: "Running npm package \(package.name) via \(process.command).")
+            }
+            if cmd.contains("python"), let module = extractPythonModule(from: args) {
+                let humanLabel = formatBinaryName(module)
+                return OwnerInference(label: humanLabel, category: .service, confidence: "high",
+                    reason: "Running Python module \(module).")
+            }
+        }
+
+        // A daemon run from its own dot-directory (`~/.foo/`) is usually the tool called foo.
+        // Skip runtime/version-manager/editor dirs where the cwd says nothing about the owner.
+        if let cwd = process.cwd {
+            let home = NSHomeDirectory()
+            if cwd.hasPrefix(home + "/.") {
+                let rest = cwd.dropFirst((home + "/.").count)
+                let toolDir = String(rest.split(separator: "/").first ?? "")
+                let notTools: Set<String> = [
+                    "cache", "local", "config", "trash", "npm", "nvm", "bun", "pnpm", "yarn", "volta", "deno",
+                    "cargo", "rustup", "pyenv", "venv", "virtualenvs", "gem", "rbenv", "asdf", "m2", "gradle",
+                    "docker", "ssh", "vscode", "vscode-server", "cursor", "tmp",
+                ]
+                if !toolDir.isEmpty && !notTools.contains(toolDir.lowercased()) {
+                    let humanLabel = formatBinaryName(toolDir)
+                    return OwnerInference(label: humanLabel, category: .service, confidence: "medium",
+                        reason: "Working directory is ~/.\(toolDir), the configuration directory of a tool by that name.")
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func extractPythonModule(from args: String) -> String? {
+        let pieces = args.split(whereSeparator: \.isWhitespace).map(String.init)
+        if let mIndex = pieces.firstIndex(of: "-m"), mIndex + 1 < pieces.count {
+            return pieces[mIndex + 1]
+        }
+        return nil
+    }
+
+    private static func inferStandaloneService(process: ProcessFact) -> OwnerInference? {
+        let binary = (process.executablePath as NSString?)?.lastPathComponent.lowercased() ?? process.command.lowercased()
+
+        let knownServices: [String: (label: String, reason: String)] = [
+            "syncthing": ("Syncthing", "Standalone Syncthing continuous file synchronization daemon."),
+            "ollama": ("Ollama", "Standalone Ollama local AI model server."),
+            "redis-server": ("Redis", "Standalone Redis in-memory database server."),
+            "redis": ("Redis", "Standalone Redis in-memory database server."),
+            "valkey-server": ("Valkey", "Standalone Valkey in-memory database server."),
+            "postgres": ("PostgreSQL", "Standalone PostgreSQL relational database server."),
+            "pg_ctl": ("PostgreSQL", "Standalone PostgreSQL database controller."),
+            "mysqld": ("MySQL", "Standalone MySQL database server."),
+            "mariadbd": ("MariaDB", "Standalone MariaDB database server."),
+            "mongod": ("MongoDB", "Standalone MongoDB document database server."),
+            "dockerd": ("Docker", "Standalone Docker container daemon."),
+            "docker-proxy": ("Docker", "Docker port forwarding proxy."),
+            "caddy": ("Caddy", "Standalone Caddy web server."),
+            "nginx": ("Nginx", "Standalone Nginx web server / reverse proxy."),
+            "httpd": ("Apache", "Standalone Apache HTTP server."),
+            "traefik": ("Traefik", "Standalone Traefik cloud native reverse proxy."),
+            "minio": ("MinIO", "Standalone MinIO high performance object storage."),
+            "rabbitmq-server": ("RabbitMQ", "Standalone RabbitMQ message broker."),
+        ]
+
+        if let match = knownServices[binary] {
+            return OwnerInference(label: match.label, category: .service, confidence: "high", reason: match.reason)
+        }
+        return nil
+    }
+
+    private static func isUserInstalledExecutable(_ path: String) -> Bool {
+        let home = NSHomeDirectory()
+        let roots = [
+            "/opt/homebrew/", "/usr/local/",          // Homebrew (Apple Silicon / Intel) and manual installs
+            "/opt/local/", "/nix/",                   // MacPorts, Nix
+            home + "/.cargo/", home + "/go/", home + "/.local/",
+            home + "/.nvm/", home + "/.volta/", home + "/.bun/", home + "/.deno/", home + "/.npm-global/",
+            home + "/.pyenv/", home + "/.rbenv/", home + "/.asdf/",
+        ]
+        return roots.contains { path.hasPrefix($0) }
+    }
+
+    private static func formatBinaryName(_ name: String) -> String {
+        let custom: [String: String] = [
+            "openclaw": "OpenClaw",
+            "syncthing": "Syncthing",
+            "ollama": "Ollama",
+            "redis-server": "Redis",
+            "redis": "Redis",
+            "postgres": "PostgreSQL",
+            "mysqld": "MySQL",
+            "mariadbd": "MariaDB",
+            "mongod": "MongoDB",
+            "nginx": "Nginx",
+            "caddy": "Caddy",
+            "traefik": "Traefik",
+            "docker": "Docker",
+            "dockerd": "Docker",
+            "uvicorn": "Uvicorn",
+            "gunicorn": "Gunicorn",
+            "fastapi": "FastAPI",
+        ]
+        if let known = custom[name.lowercased()] { return known }
+        if name.count <= 3 { return name.uppercased() }
+        return name.prefix(1).uppercased() + name.dropFirst()
     }
 
     private static func isSystemExecutable(_ path: String) -> Bool {

@@ -540,6 +540,7 @@ private extension OwnerCategory {
         switch self {
         case .project: "project"
         case .application: "application"
+        case .service: "service"
         case .systemService: "system service"
         case .unknown: "unknown owner"
         }

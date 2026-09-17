@@ -110,6 +110,70 @@ final class LeftOpenCoreTests: XCTestCase {
             fixtureActivity(pid: 42, path: nil)))
     }
 
+    func testNodePackageLocatorSkipsIndirectionAndPrefersInnermostPackage() {
+        let global = NodePackageLocator.locate(inArguments: "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/openclaw/dist/index.js gateway --port 18789")
+        XCTAssertEqual(global?.name, "openclaw")
+        XCTAssertEqual(global?.directory, "/opt/homebrew/lib/node_modules/openclaw")
+
+        let scoped = NodePackageLocator.locate(inPath: "/x/node_modules/@scope/tool/bin/cli.js", resolvingSymlinks: false)
+        XCTAssertEqual(scoped?.name, "@scope/tool")
+        XCTAssertEqual(scoped?.directory, "/x/node_modules/@scope/tool")
+
+        let pnpm = NodePackageLocator.locate(inPath: "/p/node_modules/.pnpm/vite@5.0.0/node_modules/vite/bin/vite.js", resolvingSymlinks: false)
+        XCTAssertEqual(pnpm?.name, "vite")
+        XCTAssertEqual(pnpm?.directory, "/p/node_modules/.pnpm/vite@5.0.0/node_modules/vite")
+
+        XCTAssertNil(NodePackageLocator.locate(inPath: "/p/node_modules/.bin/next", resolvingSymlinks: false))
+        XCTAssertNil(NodePackageLocator.locate(inArguments: "node server.js --port 3000"))
+    }
+
+    func testUptimeFormatterFormatsVariousDurations() {
+        XCTAssertEqual(UptimeFormatter.format(etime: "00:15"), "< 1m")
+        XCTAssertEqual(UptimeFormatter.format(etime: "00:15", compact: true), "< 1m")
+
+        XCTAssertEqual(UptimeFormatter.format(etime: "05:30"), "5m")
+        XCTAssertEqual(UptimeFormatter.format(etime: "05:30", compact: true), "5m")
+
+        XCTAssertEqual(UptimeFormatter.format(etime: "01:15:20"), "1h 15m")
+        XCTAssertEqual(UptimeFormatter.format(etime: "01:15:20", compact: true), "1h")
+
+        XCTAssertEqual(UptimeFormatter.format(etime: "02:00:10"), "2h")
+        XCTAssertEqual(UptimeFormatter.format(etime: "02:00:10", compact: true), "2h")
+
+        XCTAssertEqual(UptimeFormatter.format(etime: "01-04:20:00"), "1d 4h")
+        XCTAssertEqual(UptimeFormatter.format(etime: "01-04:20:00", compact: true), "1d")
+
+        XCTAssertEqual(UptimeFormatter.format(etime: "02-00:10:00"), "2d")
+        XCTAssertEqual(UptimeFormatter.format(etime: "02-00:10:00", compact: true), "2d")
+
+        XCTAssertNil(UptimeFormatter.format(etime: ""))
+        XCTAssertNil(UptimeFormatter.format(etime: "invalid"))
+    }
+
+    func testParseProcessTableWithAndWithoutEtime() {
+        let withEtime = """
+            1     0 01-16:20:00 /sbin/launchd
+          500   200 02:15:30 /opt/local/bin/node
+          600   500 00:30 python
+        """
+        let table = Scanner.parseProcessTable(withEtime)
+        XCTAssertEqual(table[1]?.uptime, "1d 16h")
+        XCTAssertEqual(table[1]?.compactUptime, "1d")
+        XCTAssertEqual(table[1]?.rawElapsedTime, "01-16:20:00")
+        XCTAssertEqual(table[500]?.uptime, "2h 15m")
+        XCTAssertEqual(table[500]?.compactUptime, "2h")
+        XCTAssertEqual(table[600]?.uptime, "< 1m")
+
+        let legacyWithoutEtime = """
+            1     0 /sbin/launchd
+          500   200 /opt/local/bin/node
+        """
+        let legacyTable = Scanner.parseProcessTable(legacyWithoutEtime)
+        XCTAssertEqual(legacyTable[1]?.command, "launchd")
+        XCTAssertNil(legacyTable[1]?.uptime)
+        XCTAssertEqual(legacyTable[500]?.command, "node")
+    }
+
     private func fixtureActivity(pid: Int32, path: String?, port: Int = 3000,
                                  uid: Int32? = Int32(getuid()), appBundle: Bool = false) -> Activity {
         let listener = Listener(pid: pid, command: "node", uid: uid, user: nil,
