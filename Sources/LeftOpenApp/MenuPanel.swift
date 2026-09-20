@@ -98,6 +98,8 @@ struct MenuPanel: View {
                     Image(systemName: "chevron.left")
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
                 .accessibilityLabel(model.pendingPlan == nil ? "Back to ports" : "Back to port details")
                 .help(model.pendingPlan == nil ? "Back to ports" : "Back to port details")
                 .disabled(model.isClosing)
@@ -177,7 +179,11 @@ struct MenuPanel: View {
                     .textFieldStyle(.plain)
                     .font(.callout)
                     .focused($searchFocused)
-                    .onAppear { searchFocused = true }
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            searchFocused = true
+                        }
+                    }
                     .accessibilityLabel("Search listening ports")
                 if !query.isEmpty {
                     Button {
@@ -187,6 +193,8 @@ struct MenuPanel: View {
                             .foregroundStyle(.tertiary)
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
+                    .focusEffectDisabled()
                     .accessibilityLabel("Clear search")
                 }
             }
@@ -259,6 +267,8 @@ struct MenuPanel: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
             .disabled(!query.isEmpty)
             .accessibilityLabel("\(protectedGroups.count) not closable listeners, apps and system services")
             .accessibilityHint(expanded ? "Collapses the list" : "Expands the list")
@@ -283,24 +293,23 @@ struct MenuPanel: View {
     private func groupRows(_ groups: [ListenerGroup]) -> some View {
         Group {
             ForEach(groups) { group in
-                Button {
-                    evidenceExpanded = false
-                    if group.ports.count == 1 {
-                        model.selectedActivityID = group.primary.id
-                    } else {
-                        selectedGroupID = group.id
+                GroupRowItem(
+                    group: group,
+                    onSelect: {
+                        evidenceExpanded = false
+                        if group.ports.count == 1 {
+                            model.selectedActivityID = group.primary.id
+                        } else {
+                            selectedGroupID = group.id
+                        }
+                    },
+                    onClose: { activity in
+                        Task { await model.previewClose(activity) }
+                    },
+                    contextMenuContent: {
+                        contextMenu(for: group)
                     }
-                } label: {
-                    PortRow(group: group)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    contextMenu(for: group)
-                }
-                .accessibilityLabel("Ports \(group.ports.map(String.init).joined(separator: ", ")), \(group.primary.inference.label), \(group.primary.inference.category.accessibleName), \(group.scope == .lan ? "LAN-facing" : "local only"), PID \(group.primary.process.pid)")
-                .accessibilityHint("Opens listener details")
+                )
                 if group.id != groups.last?.id {
                     Divider().padding(.leading, 14)
                 }
@@ -499,64 +508,23 @@ struct MenuPanel: View {
                 Divider()
 
                 ForEach(group.activities.sorted { $0.listener.port < $1.listener.port }) { activity in
-                    Button {
-                        model.selectedActivityID = activity.id
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text(String(activity.listener.port))
-                                .font(.system(.body, design: .monospaced))
-                                .fontWeight(.semibold)
-                                .frame(width: 54, alignment: .leading)
-                            ProcessIconView(activity: activity, size: 18)
-                            VStack(alignment: .leading, spacing: 2) {
-                                if group.pids.count > 1 {
-                                    Text(activity.process.command + " (PID \(activity.process.pid))")
-                                        .font(.callout)
-                                        .fontWeight(.medium)
-                                        .lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Text(activity.listener.addresses.joined(separator: ", "))
-                                        Text("•")
-                                        Text(activity.scope == .lan ? "LAN-facing" : "Local only")
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                } else {
-                                    Text(activity.listener.addresses.joined(separator: ", "))
-                                        .font(.callout)
-                                        .lineLimit(1)
-                                    Text(activity.scope == .lan ? "LAN-facing" : "Local only")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                    ProcessDetailPortRow(
+                        activity: activity,
+                        showCommand: group.pids.count > 1,
+                        onSelect: {
+                            evidenceExpanded = false
+                            model.selectedActivityID = activity.id
+                        },
+                        onClose: { act in
+                            Task { await model.previewClose(act) }
+                        },
+                        openBrowser: { port in
+                            openBrowser(port: port)
+                        },
+                        copyToClipboard: { str in
+                            copyToClipboard(str)
                         }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            openBrowser(port: activity.listener.port)
-                        } label: {
-                            Label("Open in Browser (http://localhost:\(String(activity.listener.port)))", systemImage: "globe")
-                        }
-                        Button {
-                            copyToClipboard("http://localhost:\(String(activity.listener.port))")
-                        } label: {
-                            Label("Copy URL", systemImage: "doc.on.doc")
-                        }
-                        Button {
-                            copyToClipboard(String(activity.listener.port))
-                        } label: {
-                            Label("Copy Port", systemImage: "number")
-                        }
-                    }
-                    .accessibilityLabel("Port \(String(activity.listener.port)), \(activity.scope == .lan ? "LAN-facing" : "local only")")
-                    .accessibilityHint("Opens port details")
+                    )
                     if activity.id != group.activities.sorted(by: { $0.listener.port < $1.listener.port }).last?.id {
                         Divider()
                     }
@@ -621,6 +589,7 @@ struct MenuPanel: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.red)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(model.isClosing)
                 }
                 .padding(.top, 6)
@@ -690,6 +659,26 @@ struct MenuPanel: View {
                 Label("Reveal in Finder", systemImage: "folder")
             }
         }
+
+        let closableActivities = group.activities.filter { CloseService.protectionReason(for: $0) == nil }
+        if !closableActivities.isEmpty {
+            Divider()
+            if group.ports.count == 1 {
+                Button(role: .destructive) {
+                    Task { await model.previewClose(group.primary) }
+                } label: {
+                    Label("Close Port \(group.ports[0]) (PID \(group.primary.process.pid))…", systemImage: "xmark.circle")
+                }
+            } else {
+                ForEach(closableActivities) { act in
+                    Button(role: .destructive) {
+                        Task { await model.previewClose(act) }
+                    } label: {
+                        Label("Close Port \(act.listener.port) (PID \(act.process.pid))…", systemImage: "xmark.circle")
+                    }
+                }
+            }
+        }
     }
 
     private func openBrowser(port: Int) {
@@ -714,11 +703,29 @@ struct MenuPanel: View {
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
                 .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
                 .font(.caption)
                 .help("Quit LeftOpen")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
+    }
+}
+
+private struct RowButtonStyle: ButtonStyle {
+    var horizontalInset: CGFloat = 6
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : (isHovered ? 0.05 : 0)))
+                    .padding(.horizontal, horizontalInset)
+            )
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
     }
 }
 
@@ -737,76 +744,268 @@ private struct ListenerGroup: Identifiable {
     var scope: ListenerScope { activities.contains { $0.scope == .lan } ? .lan : .local }
 }
 
-private struct PortRow: View {
+private struct GroupRowItem<MenuContent: View>: View {
     let group: ListenerGroup
+    let onSelect: () -> Void
+    let onClose: (Activity) -> Void
+    @ViewBuilder let contextMenuContent: () -> MenuContent
+
+    @State private var isRowHovered = false
+    @State private var isCloseBtnHovered = false
+
+    private var isClosable: Bool {
+        group.ports.count == 1 && CloseService.protectionReason(for: group.primary) == nil
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 4) {
-                Text(String(group.ports[0]))
-                    .font(.system(.callout, design: .monospaced))
-                    .fontWeight(.semibold)
-                if group.ports.count > 1 {
-                    Text("+\(group.ports.count - 1)")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1.5)
-                        .background(Color.secondary.opacity(0.15), in: Capsule())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 80, alignment: .leading)
+        HStack(spacing: 0) {
+            Button {
+                onSelect()
+            } label: {
+                HStack(spacing: 10) {
+                    HStack(spacing: 4) {
+                        Text(String(group.ports[0]))
+                            .font(.system(.callout, design: .monospaced))
+                            .fontWeight(.semibold)
+                        if group.ports.count > 1 {
+                            Text("+\(group.ports.count - 1)")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1.5)
+                                .background(Color.secondary.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 80, alignment: .leading)
 
-            ProcessIconView(activity: group.primary, size: 22)
+                    ProcessIconView(activity: group.primary, size: 22)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(group.primary.inference.label)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                if group.pids.count > 1 {
-                    Text("\(group.pids.count) processes · \(group.ports.count) ports")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text(group.primary.inference.label == group.primary.process.command
-                        ? "PID \(group.primary.process.pid)"
-                        : "\(group.primary.process.command) · PID \(group.primary.process.pid)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(group.primary.inference.label)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                        if group.pids.count > 1 {
+                            Text("\(group.pids.count) processes · \(group.ports.count) ports")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text(group.primary.inference.label == group.primary.process.command
+                                ? "PID \(group.primary.process.pid)"
+                                : "\(group.primary.process.command) · PID \(group.primary.process.pid)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 4)
+
+                    if group.ports.count > 1 {
+                        Text("\(group.ports.count) ports")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let uptime = group.primary.process.compactUptime {
+                        Text(uptime)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if group.scope == .lan {
+                        Text("LAN")
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                            .foregroundStyle(Color.orange)
+                            .help("LAN-facing bind address; actual reachability was not checked")
+                    }
                 }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 4)
-            if group.ports.count > 1 {
-                Text("\(group.ports.count) ports")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                if let uptime = group.primary.process.compactUptime {
-                    Text(uptime)
+            .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
+
+            HStack(spacing: 8) {
+                if isClosable && isRowHovered {
+                    Button {
+                        onClose(group.primary)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(isCloseBtnHovered ? Color.white : Color.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(
+                                Circle()
+                                    .fill(isCloseBtnHovered ? Color(nsColor: .systemRed) : Color.secondary.opacity(0.18))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .focusEffectDisabled()
+                    .help("Close port \(group.ports[0]) (SIGTERM PID \(group.primary.process.pid))")
+                    .onHover { isCloseBtnHovered = $0 }
+                }
+
+                Button {
+                    onSelect()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary.opacity(0.6))
+                        .frame(width: 12, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
+            }
+            .padding(.leading, 6)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(isRowHovered ? 0.05 : 0))
+                .padding(.horizontal, 6)
+        )
+        .contentShape(Rectangle())
+        .onHover { isRowHovered = $0 }
+        .contextMenu {
+            contextMenuContent()
+        }
+        .accessibilityLabel("Ports \(group.ports.map(String.init).joined(separator: ", ")), \(group.primary.inference.label), \(group.primary.inference.category.accessibleName), \(group.scope == .lan ? "LAN-facing" : "local only"), PID \(group.primary.process.pid)")
+        .accessibilityHint("Opens listener details")
+    }
+}
+
+private struct ProcessDetailPortRow: View {
+    let activity: Activity
+    let showCommand: Bool
+    let onSelect: () -> Void
+    let onClose: (Activity) -> Void
+    let openBrowser: (Int) -> Void
+    let copyToClipboard: (String) -> Void
+
+    @State private var isRowHovered = false
+    @State private var isCloseBtnHovered = false
+
+    private var isClosable: Bool {
+        CloseService.protectionReason(for: activity) == nil
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button {
+                onSelect()
+            } label: {
+                HStack(spacing: 10) {
+                    Text(String(activity.listener.port))
+                        .font(.system(.body, design: .monospaced))
+                        .fontWeight(.semibold)
+                        .frame(width: 54, alignment: .leading)
+                    ProcessIconView(activity: activity, size: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if showCommand {
+                            Text(activity.process.command + " (PID \(activity.process.pid))")
+                                .font(.callout)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                            HStack(spacing: 4) {
+                                Text(activity.listener.addresses.joined(separator: ", "))
+                                Text("•")
+                                Text(activity.scope == .lan ? "LAN-facing" : "Local only")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        } else {
+                            Text(activity.listener.addresses.joined(separator: ", "))
+                                .font(.callout)
+                                .lineLimit(1)
+                            Text(activity.scope == .lan ? "LAN-facing" : "Local only")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
+
+            HStack(spacing: 8) {
+                if isClosable && isRowHovered {
+                    Button {
+                        onClose(activity)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(isCloseBtnHovered ? Color.white : Color.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(
+                                Circle()
+                                    .fill(isCloseBtnHovered ? Color(nsColor: .systemRed) : Color.secondary.opacity(0.18))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .focusEffectDisabled()
+                    .help("Close port \(activity.listener.port) (SIGTERM PID \(activity.process.pid))")
+                    .onHover { isCloseBtnHovered = $0 }
+                }
+
+                Button {
+                    onSelect()
+                } label: {
+                    Image(systemName: "chevron.right")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 12, height: 18)
+                        .contentShape(Rectangle())
                 }
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary.opacity(0.6))
+                .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
             }
-            if group.scope == .lan {
-                Text("LAN")
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
-                    .foregroundStyle(Color.orange)
-                    .help("LAN-facing bind address; actual reachability was not checked")
+            .padding(.leading, 6)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(isRowHovered ? 0.05 : 0))
+        )
+        .contentShape(Rectangle())
+        .onHover { isRowHovered = $0 }
+        .contextMenu {
+            Button {
+                openBrowser(activity.listener.port)
+            } label: {
+                Label("Open in Browser (http://localhost:\(String(activity.listener.port)))", systemImage: "globe")
+            }
+            Button {
+                copyToClipboard("http://localhost:\(String(activity.listener.port))")
+            } label: {
+                Label("Copy URL", systemImage: "doc.on.doc")
+            }
+            Button {
+                copyToClipboard(String(activity.listener.port))
+            } label: {
+                Label("Copy Port", systemImage: "number")
+            }
+            if isClosable {
+                Divider()
+                Button(role: .destructive) {
+                    onClose(activity)
+                } label: {
+                    Label("Close Port \(activity.listener.port) (PID \(activity.process.pid))…", systemImage: "xmark.circle")
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .accessibilityLabel("Port \(String(activity.listener.port)), \(activity.scope == .lan ? "LAN-facing" : "local only")")
+        .accessibilityHint("Opens port details")
     }
 }
 
