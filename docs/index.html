@@ -3,21 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LeftOpen — Close the doors left ajar · 把那些虚掩着的门，轻轻关上</title>
-  <meta name="description" content="LeftOpen is a native macOS menu bar app and CLI: see which project and process each listening port on localhost belongs to, then close it gently. 看清 localhost 上还在监听的端口属于谁，然后温和地关掉。">
+  <title>LeftOpen - See what is listening on localhost</title>
+  <meta name="description" content="A native macOS menu bar app for seeing what is listening on localhost, identifying its project and closing it safely.">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="apple-touch-icon" href="assets/AppIcon.png">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-
-  <meta property="og:title" content="LeftOpen — See what your tools left running on localhost">
-  <meta property="og:description" content="See what your tools left running on localhost, and gently close them.">
+  <meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="LeftOpen - See what is listening on localhost">
+  <meta property="og:description" content="Identify listening ports and gently close the ones you no longer need.">
   <meta property="og:image" content="https://songhaifan.github.io/leftopen/assets/preview.png">
   <meta property="og:type" content="website">
-
   <script>
     (function () {
-      var saved = null;
+      var saved;
       try { saved = localStorage.getItem('leftopen-lang'); } catch (e) {}
       var lang = saved === 'zh' ? 'zh' : 'en';
       document.documentElement.setAttribute('data-lang', lang);
@@ -26,383 +24,152 @@
   </script>
   <style>
     :root {
-      --bg: #ffffff;
-      --bg-2: #f5f5f7;
-      --ink: #1d1d1f;
-      --ink-2: #6e6e73;
-      --ink-3: #a1a1a6;
-      --line: #e8e8ed;
-      --line-strong: #d2d2d7;
-      --accent: #e0832e;      /* the LAN orange from the app */
-      --term: #1d1d1f;
-      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", system-ui, sans-serif;
+      color-scheme: light dark;
+      --bg: #ffffff; --surface: #f5f5f7; --ink: #1d1d1f; --muted: #6e6e73; --faint: #86868b;
+      --line: #e5e5ea; --accent: #b9651c; --terminal: #1d1d1f;
+      --shadow: 0 28px 72px -28px rgb(0 0 0 / 28%), 0 10px 28px -16px rgb(0 0 0 / 18%);
+      --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
       --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-      --shadow-panel: 0 40px 80px -24px rgba(0, 0, 0, 0.28), 0 12px 28px -12px rgba(0, 0, 0, 0.12);
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #000000;
-        --bg-2: #1d1d1f;
-        --ink: #f5f5f7;
-        --ink-2: #a1a1a6;
-        --ink-3: #6e6e73;
-        --line: #2a2a2e;
-        --line-strong: #3a3a3f;
-        --accent: #f09a4d;
-        --term: #161617;
-        --shadow-panel: 0 40px 80px -24px rgba(0, 0, 0, 0.9), 0 12px 28px -12px rgba(0, 0, 0, 0.6);
+        --bg: #161617; --surface: #242426; --ink: #f5f5f7; --muted: #a1a1a6; --faint: #86868b;
+        --line: #363639; --accent: #f0a35c; --terminal: #0c0c0d;
+        --shadow: 0 28px 72px -28px rgb(0 0 0 / 82%), 0 10px 28px -16px rgb(0 0 0 / 62%);
       }
     }
-
-    /* Bilingual: every text block exists twice; <html data-lang> picks one. */
     html[data-lang="en"] [lang="zh"], html[data-lang="zh"] [lang="en"] { display: none !important; }
-    .lang-toggle {
-      border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--ink-2);
-      font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; letter-spacing: 0.02em;
-    }
-    .lang-toggle:hover { color: var(--ink); background: var(--bg-2); }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
-    body {
-      background: var(--bg);
-      color: var(--ink);
-      font-family: var(--sans);
-      font-size: 17px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
     a { color: inherit; text-decoration: none; }
-    code { font-family: var(--mono); font-size: 0.92em; }
-
-    .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
-
-    /* ---- top bar ------------------------------------------------------ */
-    .top {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 18px 0;
-    }
-    .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+    code, pre { font-family: var(--mono); }
+    .wrap { width: min(100% - 40px, 960px); margin: 0 auto; }
+    .top { min-height: 68px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+    .brand { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 650; white-space: nowrap; }
     .brand img { width: 15px; height: 25px; }
-    .top nav { display: flex; gap: 26px; font-size: 13px; color: var(--ink-2); }
-    .top nav a:hover { color: var(--ink); }
-
-    /* ---- hero --------------------------------------------------------- */
-    .hero {
-      display: flex; flex-direction: column; align-items: center; text-align: center;
-      padding: 72px 0 96px;
-    }
-    .hero h1 {
-      font-weight: 600;
-      font-size: clamp(38px, 6.2vw, 64px);
-      line-height: 1.12;
-      letter-spacing: -0.025em;
-      margin-bottom: 18px;
-    }
-    .hero .en {
-      font-size: 20px; color: var(--ink-2); max-width: 32em; margin: 0 auto 36px; line-height: 1.5;
-      letter-spacing: -0.01em;
-    }
-    .install {
-      display: inline-flex; align-items: stretch; text-align: left;
-      border: 1px solid var(--line-strong); border-radius: 12px;
-      background: var(--bg); overflow: hidden; max-width: 100%;
-    }
-    .install code {
-      font-family: var(--mono); font-size: 13.5px; padding: 12px 18px;
-      white-space: nowrap; overflow-x: auto; color: var(--ink);
-    }
-    .install code .p { color: var(--ink-3); }
-    .install button {
-      border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink-2);
-      font: inherit; font-size: 13px; padding: 0 16px; cursor: pointer;
-    }
-    .install button:hover { color: var(--ink); background: var(--bg-2); }
-    .hero .alt { margin-top: 14px; font-size: 13px; color: var(--ink-3); }
-    .hero .alt a { color: var(--ink-2); }
-    .hero .alt a:hover { color: var(--ink); text-decoration: underline; }
-    .hero .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 22px; font-size: 12.5px; color: var(--ink-3); }
-    .hero .badges span::before { content: "·"; margin-right: 10px; color: var(--line-strong); }
-    .hero .badges span:first-child::before { content: none; }
-
-    .shot { width: min(100%, 375px); margin-top: 72px; }
-    .shot img {
-      display: block; width: 100%; height: auto;
-      border-radius: 16px; box-shadow: var(--shadow-panel);
-    }
-
-    /* ---- section scaffolding ----------------------------------------- */
-    section { padding: 96px 0; border-top: 1px solid var(--line); }
-    .kicker {
-      font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
-      color: var(--ink-3); margin-bottom: 36px;
-    }
-
-    /* ---- what it sees ------------------------------------------------- */
-    .sees { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px 64px; }
-    .sees .item { display: grid; grid-template-columns: 30px 1fr; gap: 12px; }
-    .sees .n { font-family: var(--mono); font-size: 12px; color: var(--ink-3); padding-top: 7px; }
-    .sees h3 { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
-    .sees p { color: var(--ink-2); font-size: 15px; line-height: 1.6; }
-    .sees code { color: var(--ink); }
-
-    /* ---- restraint ---------------------------------------------------- */
-    .restraint { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 64px; }
-    .restraint .lede { font-size: 32px; font-weight: 600; line-height: 1.25; letter-spacing: -0.025em; }
-    .rules { list-style: none; border-top: 1px solid var(--line); }
-    .rules li {
-      display: grid; grid-template-columns: 140px 1fr; gap: 16px;
-      padding: 18px 0; border-bottom: 1px solid var(--line); font-size: 15px;
-    }
-    .rules li b { font-weight: 600; letter-spacing: -0.01em; }
-    .rules li span { color: var(--ink-2); }
-    .rules li code { color: var(--ink); }
-
-    /* ---- origin ------------------------------------------------------- */
-    .origin { max-width: 640px; }
-    .origin p { color: var(--ink-2); margin-bottom: 20px; font-size: 17px; }
-    .origin p:first-of-type { color: var(--ink); font-size: 21px; line-height: 1.5; letter-spacing: -0.015em; }
-    .origin .sig { color: var(--ink); font-weight: 600; letter-spacing: -0.015em; margin-top: 8px; }
-
-    /* ---- cli ---------------------------------------------------------- */
-    .cli { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: start; }
-    .cli p { color: var(--ink-2); font-size: 15px; margin-bottom: 22px; }
-    .cmds { list-style: none; }
-    .cmds li { display: grid; grid-template-columns: 190px 1fr; gap: 12px; padding: 10px 0; font-size: 14px; border-top: 1px solid var(--line); }
-    .cmds li:last-child { border-bottom: 1px solid var(--line); }
-    .cmds code { font-size: 13px; }
-    .cmds span { color: var(--ink-2); }
-    .term {
-      background: var(--term); color: #f5f5f7; border-radius: 18px;
-      font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
-      padding: 22px 24px; overflow-x: auto;
-    }
+    .nav { display: flex; align-items: center; gap: 20px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .nav a:hover, .nav a:focus-visible { color: var(--ink); }
+    .lang-toggle { border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+    .lang-toggle:hover, .lang-toggle:focus-visible { color: var(--ink); background: var(--surface); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 375px); align-items: center; gap: clamp(40px, 8vw, 96px); min-height: min(720px, calc(100dvh - 68px)); padding: 54px 0 72px; }
+    h1 { max-width: 600px; margin: 0; font-size: clamp(42px, 6vw, 66px); line-height: 1.06; letter-spacing: -0.045em; font-weight: 650; }
+    .intro { max-width: 31rem; margin: 20px 0 28px; color: var(--muted); font-size: 19px; line-height: 1.45; letter-spacing: -0.015em; }
+    .install { display: inline-flex; max-width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .install code { min-width: 0; padding: 12px 15px; overflow-x: auto; color: var(--ink); font-size: 13px; white-space: nowrap; }
+    .prompt { color: var(--faint); }
+    .install button { flex: 0 0 auto; border: 0; border-left: 1px solid var(--line); padding: 0 14px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+    .install button:hover, .install button:focus-visible { color: var(--ink); background: var(--bg); }
+    .alternate { margin: 12px 0 0; color: var(--faint); font-size: 13px; }
+    .alternate a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+    .shot { margin: 0; justify-self: end; width: min(100%, 375px); }
+    .shot img { display: block; width: 100%; height: auto; border-radius: 16px; box-shadow: var(--shadow); }
+    section { border-top: 1px solid var(--line); padding: 80px 0; }
+    h2 { max-width: 620px; margin: 0 0 34px; font-size: clamp(28px, 4vw, 40px); line-height: 1.14; letter-spacing: -0.035em; }
+    .essentials { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 28px; }
+    .essential { grid-column: span 6; padding-top: 18px; border-top: 1px solid var(--line); }
+    .essential:last-child { grid-column: 4 / span 6; }
+    .essential h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: -0.02em; }
+    .essential p { max-width: 31rem; margin: 0; color: var(--muted); font-size: 15px; }
+    .safety { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(36px, 8vw, 80px); align-items: start; }
+    .safety h2 { margin-bottom: 0; }
+    .safety p { margin: 0; color: var(--muted); }
+    .safety strong { color: var(--ink); }
+    .cli { display: grid; grid-template-columns: minmax(0, .8fr) minmax(300px, 1.2fr); gap: clamp(36px, 7vw, 70px); align-items: start; }
+    .cli p { max-width: 29rem; margin: 0; color: var(--muted); }
+    .commands { display: grid; gap: 14px; margin-top: 24px; }
+    .command { display: grid; grid-template-columns: 150px 1fr; gap: 12px; font-size: 14px; }
+    .command span { color: var(--muted); }
+    .term { overflow-x: auto; border-radius: 16px; background: var(--terminal); color: #f5f5f7; padding: 22px; font-size: 12px; line-height: 1.65; box-shadow: var(--shadow); }
     .term pre { margin: 0; white-space: pre; }
-    .term .d { color: #86868b; }
-    .term .h { color: #fff; font-weight: 600; }
-    .term .lan { color: var(--accent); }
-
-    /* ---- faq ---------------------------------------------------------- */
-    .faq { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 48px; }
-    .faq h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 8px; }
-    .faq p { font-size: 14.5px; color: var(--ink-2); }
-
-    footer {
-      border-top: 1px solid var(--line); padding: 32px 0 56px;
-      display: flex; justify-content: space-between; align-items: center;
-      font-size: 12.5px; color: var(--ink-3);
+    .dim { color: #86868b; }
+    .lan { color: var(--accent); }
+    footer { display: flex; justify-content: space-between; gap: 20px; padding: 28px 0 48px; color: var(--faint); font-size: 13px; }
+    footer nav { display: flex; gap: 18px; }
+    footer a:hover, footer a:focus-visible { color: var(--ink); }
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 32px, 600px); }
+      .top { min-height: 60px; gap: 12px; }
+      .nav { gap: 13px; font-size: 12px; }
+      .nav .release { display: none; }
+      .hero { grid-template-columns: 1fr; min-height: 0; gap: 42px; padding: 56px 0 64px; }
+      h1 { font-size: clamp(40px, 12vw, 54px); }
+      .intro { font-size: 18px; }
+      .shot { justify-self: center; width: min(100%, 340px); }
+      section { padding: 60px 0; }
+      .essentials { display: block; }
+      .essential, .essential:last-child { margin-top: 24px; grid-column: auto; }
+      .essential:first-child { margin-top: 0; }
+      .safety, .cli { grid-template-columns: 1fr; gap: 28px; }
+      .command { grid-template-columns: 1fr; gap: 2px; }
+      footer { flex-direction: column; gap: 14px; padding-bottom: 32px; }
     }
-    footer nav { display: flex; gap: 20px; }
-    footer nav a:hover { color: var(--ink); }
-
-    @media (max-width: 1000px) {
-      .cli { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 820px) {
-      .hero { padding: 40px 0 72px; }
-      .hero .en { font-size: 18px; }
-      .shot { margin-top: 48px; width: min(100%, 340px); }
-      section { padding: 72px 0; }
-      .sees, .restraint, .faq { grid-template-columns: 1fr; gap: 40px; }
-      .restraint .lede { font-size: 28px; }
-      .rules li { grid-template-columns: 1fr; gap: 4px; }
-      .cmds li { grid-template-columns: 1fr; gap: 2px; }
-      .top nav { gap: 18px; }
-      footer { flex-direction: column; gap: 14px; align-items: flex-start; }
+    @media (max-width: 390px) {
+      .nav a:first-child { display: none; }
+      .install { display: flex; width: 100%; }
+      .install code { flex: 1 1 auto; }
+      .install button { padding: 0 12px; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header class="top">
-      <a class="brand" href="#"><img src="assets/logo.svg" alt="">LeftOpen</a>
-      <nav>
-        <a href="#cli">CLI</a>
-        <a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a>
-        <a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
+      <a class="brand" href="#top"><img src="assets/logo.svg" alt="">LeftOpen</a>
+      <nav class="nav" aria-label="Primary navigation">
+        <a href="#cli">CLI</a><a class="release" href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a><a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
         <button class="lang-toggle" id="lang" type="button" aria-label="Switch language"><span lang="zh">EN</span><span lang="en">中文</span></button>
       </nav>
     </header>
-
-    <main>
-      <section class="hero" style="border-top:0">
+    <main id="top">
+      <section class="hero" style="border-top: 0;">
         <div>
-          <h1 lang="zh">把那些虚掩着的门，<br>轻轻关上。</h1>
-          <h1 lang="en">Close the doors<br>left ajar.</h1>
-          <p class="en" lang="zh">See what your tools left running on localhost — which project, which process, how long — and gently close them.</p>
-          <p class="en" lang="en">See what your tools left running on localhost — which project, which process, how long — and gently close them.</p>
-          <div class="install">
-            <code><span class="p">$ </span>brew install --cask songhaifan/tap/leftopen</code>
-            <button id="copy" type="button" aria-label="Copy install command"><span lang="zh">复制</span><span lang="en">Copy</span></button>
-          </div>
-          <p class="alt" lang="zh">或者下载 <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.1)</a>，解压后拖进「应用程序」。</p>
-          <p class="alt" lang="en">Or download <a href="https://github.com/SonghaiFan/leftopen/releases/latest">LeftOpen.zip (v0.3.1)</a> and drop it into Applications.</p>
-          <div class="badges">
-            <span>macOS 14+</span><span lang="zh">Apple 公证</span><span lang="en">Notarized by Apple</span><span lang="zh">原生 SwiftUI</span><span lang="en">Native SwiftUI</span><span>MIT</span>
-          </div>
+          <h1 lang="zh">把虚掩着的门<br>轻轻关上。</h1><h1 lang="en">Gently close the doors<br>left ajar.</h1>
+          <p class="intro" lang="zh">LeftOpen 在菜单栏里告诉你 localhost 上的端口、进程和可能关联的项目。</p>
+          <p class="intro" lang="en">LeftOpen shows the ports, processes and likely projects still listening on localhost.</p>
+          <div class="install"><code><span class="prompt">$ </span>brew install --cask songhaifan/tap/leftopen</code><button id="copy" type="button" aria-label="Copy install command"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
+          <p class="alternate" lang="zh">也可从 <a href="https://github.com/SonghaiFan/leftopen/releases/latest">GitHub Releases</a> 下载。</p>
+          <p class="alternate" lang="en">Or download it from <a href="https://github.com/SonghaiFan/leftopen/releases/latest">GitHub Releases</a>.</p>
         </div>
-        <figure class="shot">
-          <picture>
-            <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
-            <img src="assets/preview.png" width="375" height="460" alt="LeftOpen menu bar panel: closable ports first, apps and system services folded away">
-          </picture>
-        </figure>
+        <figure class="shot"><picture><source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)"><img src="assets/preview.png" width="375" height="460" alt="The LeftOpen menu bar panel showing listening ports and their owners"></picture></figure>
       </section>
-
-      <section id="sees">
-        <p class="kicker" lang="zh">它看到什么</p>
-        <p class="kicker" lang="en">What it sees</p>
-        <div class="sees">
-          <div class="item">
-            <span class="n">01</span>
-            <div>
-              <h3 lang="zh">端口属于哪个项目</h3>
-              <h3 lang="en">Whose port it is</h3>
-              <p lang="zh">沿工作目录向上找 <code>.git</code>、<code>package.json</code>、<code>pyproject.toml</code>、<code>Cargo.toml</code>、<code>go.mod</code>；全局 npm 包、<code>python -m</code> 模块、Redis / Postgres / Ollama 这类独立服务也按名字识别，不再只是一个 <code>node</code>。</p>
-              <p lang="en">Walks up from the working directory to <code>.git</code>, <code>package.json</code>, <code>pyproject.toml</code>, <code>Cargo.toml</code> or <code>go.mod</code>. Global npm packages, <code>python -m</code> modules and standalone services like Redis, Postgres or Ollama are named too — not just <code>node</code>.</p>
-            </div>
-          </div>
-          <div class="item">
-            <span class="n">02</span>
-            <div>
-              <h3 lang="zh">真实图标，不预存</h3>
-              <h3 lang="en">Real icons, nothing bundled</h3>
-              <p lang="zh">先取 .app 自带图标；再找项目或包自己带的（Tauri / Electron app icon、<code>index.html</code> 声明的 favicon、<code>public/</code> 约定）；最后向本机服务器抓 favicon。LeftOpen 自己不打包任何第三方图标。</p>
-              <p lang="en">The .app icon when there is one; otherwise what the project or package ships itself (Tauri / Electron app icon, the favicon declared in <code>index.html</code>, <code>public/</code> conventions); otherwise the favicon served by the local server. LeftOpen carries no third-party icons of its own.</p>
-            </div>
-          </div>
-          <div class="item">
-            <span class="n">03</span>
-            <div>
-              <h3 lang="zh">先看该关的</h3>
-              <h3 lang="en">Closable first</h3>
-              <p lang="zh">可关闭的端口排在最前，系统服务和 app 折叠收起。菜单栏用门的开合告诉你还有没有服务开着，每一行都标着它已经跑了多久。</p>
-              <p lang="en">Ports you can close come first; system services and apps fold away. The menu bar icon is an open or closed door, and every row shows how long the process has been running.</p>
-            </div>
-          </div>
-          <div class="item">
-            <span class="n">04</span>
-            <div>
-              <h3 lang="zh">谁在局域网可见</h3>
-              <h3 lang="en">Local or LAN</h3>
-              <p lang="zh">区分只绑在 <code>127.0.0.1</code> 的端口和绑在 <code>0.0.0.0</code> / 局域网 IP 上的端口，开发接口意外暴露时一眼能看到。</p>
-              <p lang="en">Tells apart ports bound to <code>127.0.0.1</code> from ones on <code>0.0.0.0</code> or a LAN address, so an accidentally exposed dev server stands out.</p>
-            </div>
-          </div>
+      <section>
+        <h2 lang="zh">只保留需要知道的事。</h2><h2 lang="en">Only the details that matter.</h2>
+        <div class="essentials">
+          <article class="essential"><h3 lang="zh">端口属于谁</h3><h3 lang="en">Know the owner</h3><p lang="zh">从进程、工作目录和项目标记推断归属，避免只看到一个模糊的 <code>node</code>。</p><p lang="en">It uses the process, working directory and project markers, so you see more than a generic <code>node</code>.</p></article>
+          <article class="essential"><h3 lang="zh">哪里可见</h3><h3 lang="en">Know the scope</h3><p lang="zh">区分只在本机监听的服务，以及可能暴露到局域网的端口。</p><p lang="en">It distinguishes local-only services from ports that may be visible on your LAN.</p></article>
+          <article class="essential"><h3 lang="zh">该关什么</h3><h3 lang="en">Close what you choose</h3><p lang="zh">可关闭的服务在前；系统服务和应用仍可查看，但不会被 LeftOpen 关闭。</p><p lang="en">Closable services come first. System services and apps remain visible, but LeftOpen will not close them.</p></article>
         </div>
       </section>
-
-      <section id="restraint">
-        <p class="kicker" lang="zh">它不做什么</p>
-        <p class="kicker" lang="en">What it won't do</p>
-        <div class="restraint">
-          <p class="lede" lang="zh">关门的动作要轻。LeftOpen 只做请求，不做强迫，也不替你判断。</p>
-          <p class="lede" lang="en">Closing a door should be gentle. LeftOpen asks; it never forces, and it never decides for you.</p>
-          <ul class="rules">
-            <li><b lang="zh">只发 SIGTERM</b><b lang="en">SIGTERM only</b><span lang="zh">请进程自己清理退出。不 <code>kill -9</code>，不杀进程树，没有「强制」按钮。</span><span lang="en">Asks the process to clean up and exit. No <code>kill -9</code>, no process trees, no “force” button.</span></li>
-            <li><b lang="zh">关前校验</b><b lang="en">Checks before closing</b><span lang="zh">关闭瞬间重新核对 PID 与启动时间，进程已换人就不动手；先列出同一进程的其他端口再让你确认。</span><span lang="en">Re-checks PID and start time at the moment of closing and backs off if the process has been replaced; lists the process's other ports before you confirm.</span></li>
-            <li><b lang="zh">不碰系统和 app</b><b lang="en">Leaves apps and the system alone</b><span lang="zh">操作系统进程、别人的 <code>.app</code>、不属于你的用户——拒绝关闭，只展示。</span><span lang="en">OS processes, other people's <code>.app</code>s, other users' processes — shown, never closed.</span></li>
-            <li><b lang="zh">零常驻，零遥测</b><b lang="en">No daemon, no telemetry</b><span lang="zh">没有守护进程、LaunchAgent 或网络上报。只在面板打开和每分钟一次的刷新时做本地只读扫描。</span><span lang="en">No background process, LaunchAgent or network reporting. A local read-only scan when the panel opens and once a minute.</span></li>
-          </ul>
-        </div>
+      <section class="safety">
+        <h2 lang="zh">关闭前，先再确认一次。</h2><h2 lang="en">One last check before closing.</h2>
+        <p lang="zh"><strong>只发送 SIGTERM。</strong>LeftOpen 会重新确认 PID 与启动时间，并列出同一进程的其他端口。它不提供强制关闭，不碰系统进程，也不收集遥测。</p>
+        <p lang="en"><strong>SIGTERM only.</strong> LeftOpen verifies the PID and start time again, and shows other ports from the same process. There is no force-close action, no system-process control and no telemetry.</p>
       </section>
-
-      <section id="origin">
-        <p class="kicker" lang="zh">为什么做它</p>
-        <p class="kicker" lang="en">Why it exists</p>
-        <div class="origin" lang="zh">
-          <p>当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。</p>
-          <p>现有工具要么太复杂，要么只能告诉你「端口被占用」，却说不清它到底属于哪个进程、可能来自哪个项目。</p>
-          <p>所以我做了 LeftOpen。它安静地待在菜单栏里，帮你一眼看清正在监听的端口、对应的进程，以及可能关联的项目。确认之后，你可以关闭那些不再需要的服务。</p>
-          <p class="sig">把那些虚掩着的门，轻轻关上。</p>
-        </div>
-        <div class="origin" lang="en">
-          <p>When I have several coding agents working in parallel, dev servers and test runners keep starting up on different ports. By the end of the day there are always a few still running.</p>
-          <p>Existing tools are either too much, or only tell you “port in use” without saying which process it is or which project it came from.</p>
-          <p>So I made LeftOpen. It sits quietly in the menu bar and shows you the listening ports, the processes behind them and the projects they probably belong to. Once you've had a look, you close the ones you no longer need.</p>
-          <p class="sig">Close the doors left ajar, gently.</p>
-        </div>
-      </section>
-
-      <section id="cli">
-        <p class="kicker" lang="zh">终端里也一样</p>
-        <p class="kicker" lang="en">Same thing in the terminal</p>
-        <div class="cli">
-          <div>
-            <p lang="zh">App 里附带同一个引擎的命令行版本，装好就能用。归属推断、关闭前的校验、只发 SIGTERM——规则完全一致。</p>
-            <p lang="en">The app ships a CLI built on the same engine, available as soon as you install. Ownership inference, the pre-close checks, SIGTERM only — identical rules.</p>
-            <ul class="cmds">
-              <li><code>leftopen</code><span lang="zh">列出所有监听端口与归属</span><span lang="en">List every listening port and its owner</span></li>
-              <li><code>leftopen 3000</code><span lang="zh">解释这个端口是谁的</span><span lang="en">Explain who owns a port</span></li>
-              <li><code>leftopen open 3000</code><span lang="zh">在浏览器打开 localhost:3000</span><span lang="en">Open localhost:3000 in the browser</span></li>
-              <li><code>leftopen close 3000</code><span lang="zh">请它退出（SIGTERM，先确认）</span><span lang="en">Ask it to exit (SIGTERM, confirms first)</span></li>
-              <li><code>leftopen --json</code><span lang="zh">给脚本和 agent 用的结构化输出</span><span lang="en">Structured output for scripts and agents</span></li>
-            </ul>
-          </div>
-          <div class="term"><pre><span class="d">$</span> leftopen
-<span class="h">LEFT OPEN</span>
-26 listening ports · 17 processes · 1 projects · 8 LAN-visible
-
-<span class="h">MY PROJECTS</span> <span class="d">(2)</span>
-<span class="d">PORT    PID      OWNER          PROCESS    AGE      SCOPE</span>
-5173    76344    visdelta       node       2h       LOCAL
-<span class="d">         ↳ ~/Documents/visdelta</span>
-5511    4999     visdelta       node       27m      LOCAL
-<span class="d">         ↳ ~/Documents/visdelta</span>
-
-<span class="h">SERVICES</span> <span class="d">(3)</span>
-<span class="d">PORT    PID      OWNER          PROCESS    AGE      SCOPE</span>
-11434   911      Ollama         ollama     1d       LOCAL
-8384    1231     Syncthing      syncthing  1d       <span class="lan">LAN</span>
-
-<span class="h">APPLICATIONS</span> <span class="d">(16)</span>
-<span class="d">PORT    PID      OWNER          PROCESS    AGE      SCOPE</span>
-5000    696      ControlCenter  Control    3d       <span class="lan">LAN</span>
-9222    36824    Google Chrome  Chrome     5h       LOCAL
-
-<span class="d">LOCAL = this Mac only
-LAN   = may be reachable from your local network</span></pre></div>
-        </div>
-      </section>
-
-      <section id="faq">
-        <p class="kicker" lang="zh">常见问题</p>
-        <p class="kicker" lang="en">Questions</p>
-        <div class="faq">
-          <div>
-            <h3 lang="zh">为什么不做一键强杀？</h3>
-            <h3 lang="en">Why no force-kill button?</h3>
-            <p lang="zh">服务可能还握着没写盘的数据。SIGTERM 给它一个体面退出的机会；真要强杀，你在终端里 <code>kill -9</code> 只需要一秒，不必由 LeftOpen 替你决定。</p>
-            <p lang="en">A service may still hold data it hasn't written. SIGTERM gives it a chance to exit cleanly; if you really need to, <code>kill -9</code> in a terminal takes a second — that call shouldn't be LeftOpen's.</p>
-          </div>
-          <div>
-            <h3 lang="zh">图标是从哪来的？</h3>
-            <h3 lang="en">Where do the icons come from?</h3>
-            <p lang="zh">全部来自你这台 Mac 上已有的东西：.app、项目仓库、npm 包目录，或本机服务器自己提供的 favicon。找不到就用一个符号，不会去网上下载。</p>
-            <p lang="en">Only from what's already on your Mac: .app bundles, project repos, npm package folders, or the favicon a local server serves. When there's nothing, a symbol — never a download.</p>
-          </div>
-          <div>
-            <h3 lang="zh">安全与公证</h3>
-            <h3 lang="en">Signing and notarization</h3>
-            <p lang="zh">由 Apple Developer ID 签名并经 Apple 公证装订，macOS Sonoma 上下载即可打开。源码 MIT 开源，Homebrew cask 的校验和与 Release 一一对应。</p>
-            <p lang="en">Signed with an Apple Developer ID and notarized, so it opens directly on macOS Sonoma. MIT-licensed source; the Homebrew cask checksum matches the GitHub release.</p>
+      <section id="cli" class="cli">
+        <div>
+          <h2 lang="zh">终端也一样简单。</h2><h2 lang="en">The same clarity in your terminal.</h2>
+          <p lang="zh">App 随附同一套扫描与关闭规则的 CLI。</p><p lang="en">The app includes a CLI with the same scan and closing rules.</p>
+          <div class="commands">
+            <div class="command"><code>leftopen</code><span lang="zh">列出监听端口</span><span lang="en">List listening ports</span></div>
+            <div class="command"><code>leftopen 3000</code><span lang="zh">解释一个端口</span><span lang="en">Explain one port</span></div>
+            <div class="command"><code>leftopen close 3000</code><span lang="zh">确认后请求退出</span><span lang="en">Request an exit after confirmation</span></div>
           </div>
         </div>
+        <div class="term" aria-label="Example LeftOpen command output"><pre><span class="dim">$</span> leftopen
+
+<strong>MY PROJECTS</strong>
+<span class="dim">PORT    OWNER          PROCESS    SCOPE</span>
+5173    visdelta       node       LOCAL
+5511    visdelta       node       LOCAL
+
+<strong>SERVICES</strong>
+11434   Ollama         ollama     LOCAL
+8384    Syncthing      syncthing  <span class="lan">LAN</span></pre></div>
       </section>
     </main>
-
-    <footer>
-      <span lang="zh">把那些虚掩着的门，轻轻关上。</span>
-      <span lang="en">Close the doors left ajar, gently.</span>
-      <nav>
-        <a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
-        <a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a>
-        <a href="https://github.com/SonghaiFan/leftopen/blob/main/LICENSE">MIT License</a>
-      </nav>
-    </footer>
+    <footer><span lang="zh">把虚掩着的门轻轻关上。</span><span lang="en">Gently close the doors left ajar.</span><nav><a href="https://github.com/SonghaiFan/leftopen">GitHub</a><a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a><a href="https://github.com/SonghaiFan/leftopen/blob/main/LICENSE">MIT</a></nav></footer>
   </div>
-
   <script>
     document.getElementById('lang').addEventListener('click', function () {
       var next = document.documentElement.getAttribute('data-lang') === 'zh' ? 'en' : 'zh';
@@ -411,12 +178,11 @@ LAN   = may be reachable from your local network</span></pre></div>
       try { localStorage.setItem('leftopen-lang', next); } catch (e) {}
     });
     document.getElementById('copy').addEventListener('click', function () {
-      var btn = this;
+      var button = this;
       navigator.clipboard.writeText('brew install --cask songhaifan/tap/leftopen').then(function () {
-        var zh = document.documentElement.getAttribute('data-lang') === 'zh';
-        var original = btn.innerHTML;
-        btn.textContent = zh ? '已复制' : 'Copied';
-        setTimeout(function () { btn.innerHTML = original; }, 1800);
+        var original = button.innerHTML;
+        button.textContent = document.documentElement.getAttribute('data-lang') === 'zh' ? '已复制' : 'Copied';
+        setTimeout(function () { button.innerHTML = original; }, 1800);
       });
     });
   </script>
