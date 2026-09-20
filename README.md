@@ -123,6 +123,18 @@ LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 
 ---
 
+## Windows port
+
+A Windows port lives in [`windows/`](windows/README.md): a system-tray app plus a `leftopen` CLI that share one C# engine (`LeftOpen.Core`). It keeps the same philosophy and safety model — scan only when the panel opens, explainable ownership inference with confidence and reasons, and gentle close only (WM_CLOSE / console Ctrl+C / Ctrl+Break, never a force-kill).
+
+```powershell
+dotnet build windows\LeftOpen.sln
+windows\src\LeftOpen.Tray\bin\Debug\net8.0-windows\LeftOpenApp.exe   # tray app
+windows\src\LeftOpen.Cli\bin\Debug\net8.0-windows\leftopen.exe       # CLI
+```
+
+---
+
 ## License
 
 [MIT License](LICENSE)

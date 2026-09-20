@@ -1,0 +1,15 @@
+# 构建产物
+bin/
+obj/
+dist/
+dist-*/
+
+# 测试结果
+TestResults/
+*.trx
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo

@@ -123,6 +123,18 @@ LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 
 ---
 
+## Windows 版
+
+Windows 移植版位于 [`windows/`](windows/README.md)：系统托盘应用 + `leftopen` 命令行，共用一个 C# 引擎（`LeftOpen.Core`）。理念与安全模型完全一致——面板打开时才扫描、归属推断带置信度与依据、只温和关闭绝不强杀（WM_CLOSE / 控制台 Ctrl+C / Ctrl+Break）。
+
+```powershell
+dotnet build windows\LeftOpen.sln
+windows\src\LeftOpen.Tray\bin\Debug\net8.0-windows\LeftOpenApp.exe   # 托盘应用
+windows\src\LeftOpen.Cli\bin\Debug\net8.0-windows\leftopen.exe       # 命令行
+```
+
+---
+
 ## 许可证
 
 [MIT License](LICENSE)
