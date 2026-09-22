@@ -26,15 +26,16 @@ func scopeLabel(_ scope: ListenerScope) -> String {
 func printSection(_ title: String, activities: [Activity]) {
     guard !activities.isEmpty else { return }
     print("\n\(bold(title)) \(dim("(\(activities.count))"))")
-    print(dim("\(pad("PORT", 8))\(pad("PID", 9))\(pad("OWNER", 26))\(pad("PROCESS", 20))\(pad("AGE", 9))SCOPE"))
+    print(dim("\(pad("PORT", 8))\(pad("PID", 9))\(pad("OWNER", 24))\(pad("PROCESS", 16))\(pad("AGE", 8))\(pad("RAM", 9))SCOPE"))
     for activity in activities {
         let portStr = pad(activity.listener.port, 8)
         let pidStr = pad(activity.process.pid, 9)
-        let ownerStr = pad(String(activity.inference.label.prefix(24)), 26)
-        let procStr = pad(String(activity.process.command.prefix(18)), 20)
-        let ageStr = pad(activity.process.compactUptime ?? "—", 9)
+        let ownerStr = pad(String(activity.inference.label.prefix(22)), 24)
+        let procStr = pad(String(activity.process.command.prefix(14)), 16)
+        let ageStr = pad(activity.process.compactUptime ?? "—", 8)
+        let ramStr = pad(activity.process.memoryUsage ?? "—", 9)
         let scopeStr = scopeLabel(activity.scope)
-        print("\(portStr)\(pidStr)\(ownerStr)\(procStr)\(ageStr)\(scopeStr)")
+        print("\(portStr)\(pidStr)\(ownerStr)\(procStr)\(ageStr)\(ramStr)\(scopeStr)")
         if let marker = activity.projectMarker {
             print(dim("         ↳ \(compactPath(marker.root))"))
         }
@@ -79,6 +80,9 @@ func printDetail(port: Int, activities: [Activity]) {
         if let uptime = activity.process.uptime {
             let rawStr = activity.process.rawElapsedTime.map { " (\($0))" } ?? ""
             print("Uptime:     \(uptime)\(rawStr)")
+        }
+        if let memory = activity.process.memoryUsage {
+            print("Memory:     \(memory)")
         }
         print("Confidence: \(activity.inference.confidence)")
         print("Process:    \(activity.process.command)")
@@ -209,6 +213,8 @@ func printJSON(snapshot: ScanSnapshot) {
             "command": a.process.command,
             "uptime": a.process.uptime as Any,
             "rawElapsedTime": a.process.rawElapsedTime as Any,
+            "rssKB": a.process.rssKB as Any,
+            "memory": a.process.memoryUsage as Any,
             "cwd": a.process.cwd as Any,
             "executable": a.process.executablePath as Any,
             "user": a.process.user as Any,
@@ -236,21 +242,71 @@ func printJSON(snapshot: ScanSnapshot) {
     }
 }
 
+func runBatchCloseProjects(dryRun: Bool, autoConfirm: Bool, activities: [Activity]) {
+    guard !activities.isEmpty else {
+        print("\(yellow("NO PROJECTS")) No running dev project servers found.")
+        return
+    }
+    do {
+        let plans = try CloseService.prepareBatch(activities: activities)
+        guard !plans.isEmpty else {
+            print("\(yellow("NO CLOSABLE TARGETS")) No closable dev project servers found.")
+            return
+        }
+        print("\n\(bold("BATCH CLOSE PLAN")) (\(plans.count) project server\(plans.count == 1 ? "" : "s"))")
+        for plan in plans {
+            let ramStr = plan.activity.process.memoryUsage.map { " (\($0))" } ?? ""
+            print("  • Port \(plan.port): \(plan.activity.inference.label) — PID \(plan.pid)\(ramStr)")
+        }
+        if dryRun {
+            print(dim("\nDry run mode: no signal sent.\n"))
+            return
+        }
+        if !autoConfirm {
+            if isatty(STDIN_FILENO) == 0 {
+                print("An interactive terminal is required; use --yes to confirm non-interactively.")
+                exit(1)
+            }
+            print("\nClose all \(plans.count) dev project servers? [y/N] ", terminator: "")
+            fflush(stdout)
+            guard let line = readLine(), ["y", "yes"].contains(line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
+                print("Cancelled.")
+                return
+            }
+        }
+        print("Sending SIGTERM to \(plans.count) processes…")
+        let result = try CloseService.executeBatch(plans)
+        if result.isAllSuccessful {
+            print("\(green("SUCCESS")) Closed \(result.successfulPlans.count) project server\(result.successfulPlans.count == 1 ? "" : "s").")
+        } else {
+            print("\(yellow("PARTIAL")) Closed \(result.successfulPlans.count) of \(result.totalCount) servers.")
+            for failure in result.failedPlans {
+                print("  \(red("FAILED")) PID \(failure.plan.pid) (Port \(failure.plan.port)): \(failure.error)")
+            }
+        }
+    } catch {
+        print("\(red("ERROR")) \(error.localizedDescription)")
+        exit(1)
+    }
+}
+
 func printHelp() {
     print("""
 \(bold("LeftOpen")) — See what your tools left running on localhost.
 
 Usage:
-  leftopen [list]        Show all listening activity
-  leftopen <port>        Explain who owns a port
-  leftopen open <port>   Open http://localhost:<port> in default browser
-  leftopen close <port>  Gracefully close the process listening on a port
-  leftopen --json        Print machine-readable output
+  leftopen [list]               Show all listening activity
+  leftopen <port>               Explain who owns a port
+  leftopen open <port>          Open http://localhost:<port> in default browser
+  leftopen close <port>         Gracefully close the process listening on a port
+  leftopen close --all-projects Gracefully close all dev project servers
+  leftopen --json               Print machine-readable output
 
 Options:
+  --projects             Show dev project ports only
   --pid <pid>            Select a PID when multiple processes share a port
   --dry-run              Preview a close without signalling anything
-  --yes                  Confirm a close without an interactive prompt
+  --yes, -y              Confirm a close without an interactive prompt
   --no-color             Disable terminal colours
   -h, --help             Show this help
   -v, --version          Show the version
@@ -284,9 +340,11 @@ if args.contains("--json") {
 }
 
 let nonFlagArgs = args.filter { !$0.hasPrefix("-") }
+let isProjectsOnly = args.contains("--projects")
+let effectiveActivities = isProjectsOnly ? snapshot.activities.filter { $0.inference.category == .project } : snapshot.activities
 
 if nonFlagArgs.isEmpty || nonFlagArgs == ["list"] || nonFlagArgs == ["ls"] {
-    printOverview(activities: snapshot.activities)
+    printOverview(activities: effectiveActivities)
     exit(0)
 }
 
@@ -300,12 +358,16 @@ if nonFlagArgs[0] == "open" {
 }
 
 if nonFlagArgs[0] == "close" {
-    guard nonFlagArgs.count >= 2, let port = Int(nonFlagArgs[1]), port >= 1, port <= 65535 else {
-        print("\(red("ERROR")) Invalid or missing port. Usage: leftopen close <port>")
-        exit(1)
-    }
     let dryRun = args.contains("--dry-run")
     let autoConfirm = args.contains("--yes") || args.contains("-y")
+    if args.contains("--all-projects") || args.contains("--all") || (nonFlagArgs.count >= 2 && (nonFlagArgs[1] == "all" || nonFlagArgs[1] == "projects")) {
+        runBatchCloseProjects(dryRun: dryRun, autoConfirm: autoConfirm, activities: snapshot.closableProjectActivities)
+        exit(0)
+    }
+    guard nonFlagArgs.count >= 2, let port = Int(nonFlagArgs[1]), port >= 1, port <= 65535 else {
+        print("\(red("ERROR")) Invalid or missing port. Usage: leftopen close <port> or leftopen close --all-projects")
+        exit(1)
+    }
     var targetPID: Int32? = nil
     if let pidIdx = args.firstIndex(of: "--pid"), pidIdx + 1 < args.count {
         targetPID = Int32(args[pidIdx + 1])

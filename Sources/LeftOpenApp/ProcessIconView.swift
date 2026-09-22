@@ -301,20 +301,41 @@ struct ProcessIconResolver {
         if target.contains("postgres") || target.contains("pg_ctl") {
             return .symbol(name: "cylinder.split.1x2.fill", color: Color(red: 0.20, green: 0.39, blue: 0.58))
         }
-        if target.contains("redis") || target.contains("valkey") || target.contains("keydb") {
+        if target.contains("redis") || target.contains("valkey") || target.contains("keydb") || target.contains("dragonfly") {
             return .symbol(name: "cylinder.split.1x2.fill", color: Color(red: 0.85, green: 0.20, blue: 0.18))
         }
         if target.contains("mysql") || target.contains("mariadb") {
             return .symbol(name: "cylinder.split.1x2.fill", color: Color(red: 0.93, green: 0.58, blue: 0.15))
         }
+        if target.contains("clickhouse") || target.contains("surreal") {
+            return .symbol(name: "cylinder.split.1x2.fill", color: Color(red: 0.95, green: 0.70, blue: 0.10))
+        }
         if target.contains("mongod") || target.contains("mongo") {
             return .symbol(name: "leaf.fill", color: Color(red: 0.25, green: 0.64, blue: 0.33))
         }
-        if target.contains("ollama") || args.contains("ollama") || label.contains("ollama") {
-            if FileManager.default.fileExists(atPath: "/Applications/Ollama.app") {
+        if target.contains("qdrant") || target.contains("milvus") || target.contains("chroma") {
+            return .symbol(name: "circle.grid.3x3.fill", color: Color(red: 0.30, green: 0.60, blue: 0.85))
+        }
+        if target.contains("meilisearch") || target.contains("typesense") {
+            return .symbol(name: "magnifyingglass", color: Color(red: 0.95, green: 0.25, blue: 0.45))
+        }
+        if target.contains("ollama") || target.contains("llama") || target.contains("vllm") || target.contains("lmstudio") || target.contains("open-webui") || target.contains("localai") || target.contains("jan") || target.contains("dify") || args.contains("ollama") || label.contains("ollama") {
+            if FileManager.default.fileExists(atPath: "/Applications/Ollama.app") && (target.contains("ollama") || args.contains("ollama")) {
                 return .appBundle(path: "/Applications/Ollama.app")
             }
             return .symbol(name: "brain.head.profile", color: .purple)
+        }
+        if target.contains("comfyui") || args.contains("comfyui") {
+            return .symbol(name: "paintpalette.fill", color: Color(red: 0.95, green: 0.45, blue: 0.20))
+        }
+        if target.contains("ngrok") || target.contains("cloudflared") || target.contains("localtunnel") || target.contains("tailscale") {
+            return .symbol(name: "network", color: Color(red: 0.20, green: 0.70, blue: 0.85))
+        }
+        if target.contains("stripe") {
+            return .symbol(name: "creditcard.fill", color: Color(red: 0.40, green: 0.45, blue: 0.90))
+        }
+        if target.contains("supabase") {
+            return .symbol(name: "bolt.fill", color: Color(red: 0.25, green: 0.80, blue: 0.55))
         }
         if target.contains("nginx") || target.contains("caddy") || target.contains("httpd") || target.contains("apache") || target.contains("traefik") {
             return .symbol(name: "server.rack", color: .teal)
@@ -502,6 +523,30 @@ struct ProcessIconResolver {
         }
         if project.source == "go.mod" {
             return .symbol(name: "bolt.fill", color: Color(red: 0.0, green: 0.66, blue: 0.82))
+        }
+        if project.source == "Package.swift" {
+            return .symbol(name: "swift", color: Color(red: 0.98, green: 0.38, blue: 0.18))
+        }
+        if project.source == "pubspec.yaml" {
+            return .symbol(name: "app.connected.to.app.below.fill", color: Color(red: 0.10, green: 0.60, blue: 0.98))
+        }
+        if project.source == "Gemfile" {
+            return .symbol(name: "diamond.fill", color: Color(red: 0.80, green: 0.15, blue: 0.15))
+        }
+        if project.source == "composer.json" {
+            return .symbol(name: "chevron.left.forwardslash.chevron.right", color: Color(red: 0.40, green: 0.45, blue: 0.70))
+        }
+        if project.source == "pom.xml" || project.source == "build.gradle" || project.source == "build.gradle.kts" {
+            return .symbol(name: "cup.and.saucer.fill", color: Color(red: 0.88, green: 0.25, blue: 0.15))
+        }
+        if project.source == "deno.json" || project.source == "deno.jsonc" {
+            return .symbol(name: "d.circle.fill", color: .primary)
+        }
+        if project.source == "bunfig.toml" {
+            return .symbol(name: "circle.fill", color: Color(red: 0.95, green: 0.85, blue: 0.70))
+        }
+        if project.source == "mix.exs" {
+            return .symbol(name: "drop.fill", color: Color(red: 0.55, green: 0.25, blue: 0.65))
         }
 
         return nil

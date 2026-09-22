@@ -174,6 +174,35 @@ final class LeftOpenCoreTests: XCTestCase {
         XCTAssertEqual(legacyTable[500]?.command, "node")
     }
 
+    func testParseProcessTableWithRssAndMemoryUsage() {
+        let withRss = """
+            1     0 01-16:20:00 12500 /sbin/launchd
+          500   200 02:15:30 45000 /opt/local/bin/node
+          600   500 00:30 1500000 python
+        """
+        let table = Scanner.parseProcessTable(withRss)
+        XCTAssertEqual(table[1]?.uptime, "1d 16h")
+        XCTAssertEqual(table[1]?.rssKB, 12500)
+        XCTAssertEqual(table[1]?.memoryUsage, "12 MB")
+        XCTAssertEqual(table[500]?.uptime, "2h 15m")
+        XCTAssertEqual(table[500]?.rssKB, 45000)
+        XCTAssertEqual(table[500]?.memoryUsage, "44 MB")
+        XCTAssertEqual(table[600]?.rssKB, 1500000)
+        XCTAssertEqual(table[600]?.memoryUsage, "1.4 GB")
+    }
+
+    func testBatchClosePlanPreparation() throws {
+        let uid = Int32(getuid())
+        let act1 = fixtureActivity(pid: 101, path: "/opt/local/bin/node", port: 3000, uid: uid)
+        let act2 = fixtureActivity(pid: 102, path: "/opt/local/bin/python", port: 8000, uid: uid)
+        let protectedAct = fixtureActivity(pid: 103, path: "/usr/bin/python", port: 9000, uid: uid)
+
+        let plans = try CloseService.prepareBatch(activities: [act1, act2, protectedAct])
+        // protectedAct should be skipped
+        XCTAssertEqual(plans.count, 2)
+        XCTAssertEqual(Set(plans.map(\.pid)), [101, 102])
+    }
+
     private func fixtureActivity(pid: Int32, path: String?, port: Int = 3000,
                                  uid: Int32? = Int32(getuid()), appBundle: Bool = false) -> Activity {
         let listener = Listener(pid: pid, command: "node", uid: uid, user: nil,

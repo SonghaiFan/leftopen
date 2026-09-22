@@ -42,8 +42,9 @@ public struct ProcessFact: Sendable, Equatable {
     public let uptime: String?
     public let rawElapsedTime: String?
     public let arguments: String?
+    public let rssKB: UInt64?
 
-    public init(pid: Int32, ppid: Int32?, command: String, executablePath: String?, uid: Int32?, user: String?, cwd: String?, uptime: String? = nil, rawElapsedTime: String? = nil, arguments: String? = nil) {
+    public init(pid: Int32, ppid: Int32?, command: String, executablePath: String?, uid: Int32?, user: String?, cwd: String?, uptime: String? = nil, rawElapsedTime: String? = nil, arguments: String? = nil, rssKB: UInt64? = nil) {
         self.pid = pid
         self.ppid = ppid
         self.command = command
@@ -54,6 +55,20 @@ public struct ProcessFact: Sendable, Equatable {
         self.uptime = uptime
         self.rawElapsedTime = rawElapsedTime
         self.arguments = arguments
+        self.rssKB = rssKB
+    }
+
+    public var memoryUsage: String? {
+        guard let rssKB else { return nil }
+        if rssKB < 1024 {
+            return "< 1 MB"
+        } else if rssKB < 1024 * 1024 {
+            let mb = Double(rssKB) / 1024.0
+            return mb >= 100 ? "\(Int(round(mb))) MB" : String(format: "%.1f MB", mb)
+        } else {
+            let gb = Double(rssKB) / (1024.0 * 1024.0)
+            return String(format: "%.1f GB", gb)
+        }
     }
 }
 
@@ -111,6 +126,12 @@ public struct ScanSnapshot: Sendable {
     }
     public var closablePortCount: Int {
         Set(closableActivities.map(\.listener.port)).count
+    }
+    public var closableProjectActivities: [Activity] {
+        closableActivities.filter { $0.inference.category == .project }
+    }
+    public var closableProjectPortCount: Int {
+        Set(closableProjectActivities.map(\.listener.port)).count
     }
     public var hasOpenDoors: Bool {
         closablePortCount > 0

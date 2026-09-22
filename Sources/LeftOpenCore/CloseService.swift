@@ -20,6 +20,19 @@ public struct CloseResult: Sendable {
     public let remainingPIDs: [Int32]
 }
 
+public struct BatchCloseResult: Sendable {
+    public let successfulPlans: [ClosePlan]
+    public let failedPlans: [(plan: ClosePlan, error: String)]
+
+    public init(successfulPlans: [ClosePlan], failedPlans: [(plan: ClosePlan, error: String)]) {
+        self.successfulPlans = successfulPlans
+        self.failedPlans = failedPlans
+    }
+
+    public var totalCount: Int { successfulPlans.count + failedPlans.count }
+    public var isAllSuccessful: Bool { failedPlans.isEmpty }
+}
+
 public struct CloseError: LocalizedError, Sendable {
     public let message: String
     public var errorDescription: String? { message }
@@ -121,6 +134,46 @@ public enum CloseService {
         }
         return CloseResult(targetStoppedListening: !latest.contains(where: { $0.pid == plan.pid }),
             portFree: latest.isEmpty, remainingPIDs: Array(Set(latest.map(\.pid))).sorted())
+    }
+
+    public static func prepareBatch(activities: [Activity]) throws -> [ClosePlan] {
+        let currentUID = Int32(getuid())
+        let currentPID = getpid()
+        var plans: [ClosePlan] = []
+        var processedPIDs = Set<Int32>()
+
+        for activity in activities {
+            let pid = activity.process.pid
+            guard !processedPIDs.contains(pid) else { continue }
+            processedPIDs.insert(pid)
+
+            guard protectionReason(for: activity) == nil else { continue }
+            guard let plan = try? makePlan(activities: activities, port: activity.listener.port, pid: pid,
+                                           currentUID: currentUID, currentPID: currentPID, startTime: processStartTime) else {
+                continue
+            }
+            plans.append(plan)
+        }
+        return plans
+    }
+
+    public static func executeBatch(_ plans: [ClosePlan]) throws -> BatchCloseResult {
+        var successes: [ClosePlan] = []
+        var failures: [(plan: ClosePlan, error: String)] = []
+
+        for plan in plans {
+            do {
+                let res = try execute(plan)
+                if res.targetStoppedListening {
+                    successes.append(plan)
+                } else {
+                    failures.append((plan, "Process still listening after SIGTERM"))
+                }
+            } catch {
+                failures.append((plan, error.localizedDescription))
+            }
+        }
+        return BatchCloseResult(successfulPlans: successes, failedPlans: failures)
     }
 
     private static func processStartTime(_ pid: Int32) -> String? {

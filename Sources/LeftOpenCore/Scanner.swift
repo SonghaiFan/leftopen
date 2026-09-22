@@ -203,7 +203,7 @@ public enum Scanner {
         var limitations: [String] = []
         let processTable: [Int32: ProcessFact]
         do {
-            processTable = parseProcessTable(try CommandRunner.output("/bin/ps", ["-axo", "pid=,ppid=,etime=,comm="]))
+            processTable = parseProcessTable(try CommandRunner.output("/bin/ps", ["-axo", "pid=,ppid=,etime=,rss=,comm="]))
         } catch {
             processTable = [:]
             limitations.append("The process table was unavailable; parent evidence is incomplete.")
@@ -219,7 +219,8 @@ public enum Scanner {
                 executablePath: executableByPID[listener.pid] ?? table?.executablePath,
                 uid: listener.uid, user: listener.user, cwd: cwdByPID[listener.pid],
                 uptime: table?.uptime, rawElapsedTime: table?.rawElapsedTime,
-                arguments: argumentsByPID[listener.pid])
+                arguments: argumentsByPID[listener.pid],
+                rssKB: table?.rssKB)
             let parents = parentChain(for: process, in: processTable)
             let project = process.cwd.flatMap { projects[$0] }
             let bundle = applicationBundle(for: process, parents: parents)
@@ -276,20 +277,33 @@ public enum Scanner {
             let pieces = line.split(whereSeparator: \.isWhitespace)
             guard pieces.count >= 3, let pid = Int32(pieces[0]), let ppid = Int32(pieces[1]) else { continue }
             let etime: String?
+            let rssKB: UInt64?
             let rawCommand: String
             if pieces.count >= 4 && (pieces[2].contains(":") || pieces[2].contains("-")) {
                 etime = String(pieces[2])
-                rawCommand = pieces.dropFirst(3).joined(separator: " ")
+                if pieces.count >= 5, let rss = UInt64(pieces[3]) {
+                    rssKB = rss
+                    rawCommand = pieces.dropFirst(4).joined(separator: " ")
+                } else {
+                    rssKB = nil
+                    rawCommand = pieces.dropFirst(3).joined(separator: " ")
+                }
             } else {
                 etime = nil
-                rawCommand = pieces.dropFirst(2).joined(separator: " ")
+                if pieces.count >= 4, let rss = UInt64(pieces[2]) {
+                    rssKB = rss
+                    rawCommand = pieces.dropFirst(3).joined(separator: " ")
+                } else {
+                    rssKB = nil
+                    rawCommand = pieces.dropFirst(2).joined(separator: " ")
+                }
             }
             let executable = rawCommand.hasPrefix("/") ? rawCommand : nil
             let command = executable.map { URL(fileURLWithPath: $0).lastPathComponent } ?? rawCommand
             let uptime = etime.flatMap { UptimeFormatter.format(etime: $0) }
             table[pid] = ProcessFact(pid: pid, ppid: ppid, command: command,
                 executablePath: executable, uid: nil, user: nil, cwd: nil,
-                uptime: uptime, rawElapsedTime: etime)
+                uptime: uptime, rawElapsedTime: etime, rssKB: rssKB)
         }
         return table
     }
@@ -379,6 +393,10 @@ public enum Scanner {
                 return OwnerInference(label: humanLabel, category: .service, confidence: "high",
                     reason: "Running Python module \(module).")
             }
+            if let framework = extractCLIOrFramework(from: args) {
+                return OwnerInference(label: framework.label, category: .service, confidence: "high",
+                    reason: framework.reason)
+            }
         }
 
         // A daemon run from its own dot-directory (`~/.foo/`) is usually the tool called foo.
@@ -403,6 +421,27 @@ public enum Scanner {
         return nil
     }
 
+    private static func extractCLIOrFramework(from args: String) -> (label: String, reason: String)? {
+        let lower = args.lowercased()
+        let frameworks: [(pattern: String, label: String, reason: String)] = [
+            ("streamlit run", "Streamlit", "Running Streamlit web application."),
+            ("gradio", "Gradio", "Running Gradio machine learning interface."),
+            ("jupyter-lab", "JupyterLab", "Running JupyterLab notebook server."),
+            ("jupyter notebook", "Jupyter", "Running Jupyter notebook server."),
+            ("uvicorn", "Uvicorn", "Running Uvicorn ASGI server."),
+            ("gunicorn", "Gunicorn", "Running Gunicorn WSGI server."),
+            ("celery", "Celery", "Running Celery distributed task worker."),
+            ("comfyui", "ComfyUI", "Running ComfyUI interface server."),
+            ("vllm", "vLLM", "Running vLLM inference server."),
+        ]
+        for item in frameworks {
+            if lower.contains(item.pattern) {
+                return (item.label, item.reason)
+            }
+        }
+        return nil
+    }
+
     private static func extractPythonModule(from args: String) -> String? {
         let pieces = args.split(whereSeparator: \.isWhitespace).map(String.init)
         if let mIndex = pieces.firstIndex(of: "-m"), mIndex + 1 < pieces.count {
@@ -417,6 +456,28 @@ public enum Scanner {
         let knownServices: [String: (label: String, reason: String)] = [
             "syncthing": ("Syncthing", "Standalone Syncthing continuous file synchronization daemon."),
             "ollama": ("Ollama", "Standalone Ollama local AI model server."),
+            "llama-server": ("llama.cpp", "Local llama.cpp LLM inference server."),
+            "llama.cpp": ("llama.cpp", "Local llama.cpp LLM inference server."),
+            "vllm": ("vLLM", "High-throughput LLM serving engine."),
+            "lmstudio": ("LM Studio", "LM Studio local AI server."),
+            "lm-studio": ("LM Studio", "LM Studio local AI server."),
+            "comfyui": ("ComfyUI", "Modular Stable Diffusion GUI & server."),
+            "open-webui": ("Open WebUI", "Self-hosted AI interface server."),
+            "localai": ("LocalAI", "OpenAI-compatible local AI server."),
+            "jan": ("Jan", "Jan local AI assistant runtime."),
+            "dify": ("Dify", "Dify LLM application development platform."),
+            "text-generation-webui": ("Text Gen WebUI", "Text generation web UI server."),
+            "qdrant": ("Qdrant", "Vector similarity search engine."),
+            "milvus": ("Milvus", "Cloud-native vector database."),
+            "chroma": ("Chroma", "AI embedding vector database."),
+            "chromadb": ("Chroma", "AI embedding vector database."),
+            "meilisearch": ("Meilisearch", "Fast, typo-tolerant search engine."),
+            "typesense": ("Typesense", "Open source typo-tolerant search engine."),
+            "clickhouse": ("ClickHouse", "Fast column-oriented DBMS."),
+            "clickhouse-server": ("ClickHouse", "Fast column-oriented DBMS."),
+            "surreal": ("SurrealDB", "Scalable multi-model cloud database."),
+            "surrealdb": ("SurrealDB", "Scalable multi-model cloud database."),
+            "dragonfly": ("Dragonfly", "Modern in-memory datastore."),
             "redis-server": ("Redis", "Standalone Redis in-memory database server."),
             "redis": ("Redis", "Standalone Redis in-memory database server."),
             "valkey-server": ("Valkey", "Standalone Valkey in-memory database server."),
@@ -433,6 +494,13 @@ public enum Scanner {
             "traefik": ("Traefik", "Standalone Traefik cloud native reverse proxy."),
             "minio": ("MinIO", "Standalone MinIO high performance object storage."),
             "rabbitmq-server": ("RabbitMQ", "Standalone RabbitMQ message broker."),
+            "ngrok": ("ngrok", "Reverse proxy tunnel to localhost."),
+            "cloudflared": ("Cloudflare Tunnel", "Cloudflare Zero Trust tunnel client."),
+            "localtunnel": ("localtunnel", "Exposes localhost to the world."),
+            "tailscale": ("Tailscale", "Tailscale mesh VPN / Funnel service."),
+            "tailscaled": ("Tailscale", "Tailscale mesh VPN daemon."),
+            "stripe": ("Stripe CLI", "Stripe developer CLI & webhook forwarder."),
+            "supabase": ("Supabase", "Supabase local development stack."),
         ]
 
         if let match = knownServices[binary] {
@@ -458,6 +526,24 @@ public enum Scanner {
             "openclaw": "OpenClaw",
             "syncthing": "Syncthing",
             "ollama": "Ollama",
+            "llama-server": "llama.cpp",
+            "vllm": "vLLM",
+            "lmstudio": "LM Studio",
+            "comfyui": "ComfyUI",
+            "open-webui": "Open WebUI",
+            "localai": "LocalAI",
+            "dify": "Dify",
+            "qdrant": "Qdrant",
+            "milvus": "Milvus",
+            "chroma": "Chroma",
+            "chromadb": "Chroma",
+            "meilisearch": "Meilisearch",
+            "typesense": "Typesense",
+            "clickhouse": "ClickHouse",
+            "clickhouse-server": "ClickHouse",
+            "surreal": "SurrealDB",
+            "surrealdb": "SurrealDB",
+            "dragonfly": "Dragonfly",
             "redis-server": "Redis",
             "redis": "Redis",
             "postgres": "PostgreSQL",
@@ -472,6 +558,15 @@ public enum Scanner {
             "uvicorn": "Uvicorn",
             "gunicorn": "Gunicorn",
             "fastapi": "FastAPI",
+            "streamlit": "Streamlit",
+            "gradio": "Gradio",
+            "ngrok": "ngrok",
+            "cloudflared": "Cloudflare Tunnel",
+            "localtunnel": "localtunnel",
+            "tailscale": "Tailscale",
+            "tailscaled": "Tailscale",
+            "stripe": "Stripe CLI",
+            "supabase": "Supabase",
         ]
         if let known = custom[name.lowercased()] { return known }
         if name.count <= 3 { return name.uppercased() }
@@ -487,7 +582,11 @@ public enum Scanner {
     private static func findProject(_ cwd: String) -> ProjectMarker? {
         guard cwd.hasPrefix("/"), cwd != "/" else { return nil }
         var directory = URL(fileURLWithPath: cwd).standardizedFileURL.path
-        let markers = [".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod"]
+        let markers = [
+            ".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
+            "Package.swift", "pubspec.yaml", "Gemfile", "mix.exs", "composer.json",
+            "pom.xml", "build.gradle", "build.gradle.kts", "deno.json", "deno.jsonc", "bunfig.toml"
+        ]
         while directory != "/" {
             if !rejectProjectPath(directory, cwd: cwd) {
                 for marker in markers {
@@ -524,14 +623,26 @@ public enum Scanner {
     }
 
     private static func projectName(_ directory: String, marker: String) -> String {
+        let fm = FileManager.default
+        let markerPath = (directory as NSString).appendingPathComponent(marker)
         if marker == "package.json",
-           let data = FileManager.default.contents(atPath: (directory as NSString).appendingPathComponent(marker)),
+           let data = fm.contents(atPath: markerPath),
            let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
            let name = value["name"] as? String, !name.trimmingCharacters(in: .whitespaces).isEmpty {
             return name.trimmingCharacters(in: .whitespaces)
         }
+        if marker == "composer.json" || marker == "deno.json",
+           let data = fm.contents(atPath: markerPath),
+           let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let name = value["name"] as? String, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            if marker == "composer.json", let slash = trimmed.lastIndex(of: "/") {
+                return String(trimmed[trimmed.index(after: slash)...])
+            }
+            return trimmed
+        }
         if marker == "pyproject.toml",
-           let data = FileManager.default.contents(atPath: (directory as NSString).appendingPathComponent(marker)),
+           let data = fm.contents(atPath: markerPath),
            let contents = String(data: data, encoding: .utf8) {
             var inProjectSection = false
             for line in contents.split(whereSeparator: \.isNewline) {
@@ -546,6 +657,37 @@ public enum Scanner {
                         return String(candidate.dropFirst().dropLast())
                     }
                 }
+            }
+        }
+        if marker == "pubspec.yaml",
+           let data = fm.contents(atPath: markerPath),
+           let contents = String(data: data, encoding: .utf8) {
+            for line in contents.split(whereSeparator: \.isNewline) {
+                let text = line.trimmingCharacters(in: .whitespaces)
+                if text.hasPrefix("name:") {
+                    let name = text.dropFirst(5).trimmingCharacters(in: CharacterSet(charactersIn: " '\"\t"))
+                    if !name.isEmpty { return name }
+                }
+            }
+        }
+        if marker == "Package.swift",
+           let data = fm.contents(atPath: markerPath),
+           let contents = String(data: data, encoding: .utf8) {
+            if let regex = try? NSRegularExpression(pattern: #"name:\s*"([^"]+)""#),
+               let match = regex.firstMatch(in: contents, range: NSRange(contents.startIndex..<contents.endIndex, in: contents)),
+               let r = Range(match.range(at: 1), in: contents) {
+                let name = String(contents[r])
+                if !name.isEmpty { return name }
+            }
+        }
+        if marker == "pom.xml",
+           let data = fm.contents(atPath: markerPath),
+           let contents = String(data: data, encoding: .utf8) {
+            if let regex = try? NSRegularExpression(pattern: #"<artifactId>([^<]+)</artifactId>"#),
+               let match = regex.firstMatch(in: contents, range: NSRange(contents.startIndex..<contents.endIndex, in: contents)),
+               let r = Range(match.range(at: 1), in: contents) {
+                let name = String(contents[r]).trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty { return name }
             }
         }
         return URL(fileURLWithPath: directory).lastPathComponent

@@ -64,7 +64,9 @@ struct MenuPanel: View {
             header
             Divider()
             if let notice = model.notice { noticeView(notice) }
-            if let plan = model.pendingPlan {
+            if let plans = model.pendingBatchPlans {
+                batchReviewView(plans)
+            } else if let plan = model.pendingPlan {
                 reviewView(plan)
             } else if let activity = selectedActivity {
                 detailView(activity)
@@ -85,9 +87,11 @@ struct MenuPanel: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            if model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
+            if model.pendingBatchPlans != nil || model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
                 Button {
-                    if model.pendingPlan != nil {
+                    if model.pendingBatchPlans != nil {
+                        model.pendingBatchPlans = nil
+                    } else if model.pendingPlan != nil {
                         model.pendingPlan = nil
                     } else if model.selectedActivityID != nil {
                         model.selectedActivityID = nil
@@ -100,14 +104,14 @@ struct MenuPanel: View {
                 .buttonStyle(.plain)
                 .focusable(false)
                 .focusEffectDisabled()
-                .accessibilityLabel(model.pendingPlan == nil ? "Back to ports" : "Back to port details")
-                .help(model.pendingPlan == nil ? "Back to ports" : "Back to port details")
+                .accessibilityLabel(model.pendingPlan == nil && model.pendingBatchPlans == nil ? "Back to ports" : "Back to port details")
+                .help(model.pendingPlan == nil && model.pendingBatchPlans == nil ? "Back to ports" : "Back to port details")
                 .disabled(model.isClosing)
             }
             DoorMark(isOpen: model.hasOpenDoors)
                 .frame(width: 18, height: 30)
                 .accessibilityHidden(true)
-            if model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
+            if model.pendingBatchPlans != nil || model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
                 Text("LeftOpen").font(.headline)
             } else {
                 VStack(alignment: .leading, spacing: 3) {
@@ -135,7 +139,7 @@ struct MenuPanel: View {
                 }
             }
             Spacer()
-            if model.pendingPlan == nil {
+            if model.pendingPlan == nil && model.pendingBatchPlans == nil {
                 Button {
                     Task { await model.refresh() }
                 } label: {
@@ -214,7 +218,7 @@ struct MenuPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if !projectGroups.isEmpty {
-                            groupSection("Projects", groups: projectGroups)
+                            groupSection("Projects", groups: projectGroups, isProjectSection: true)
                         }
                         if !serviceGroups.isEmpty {
                             groupSection("Other Processes", groups: serviceGroups)
@@ -278,14 +282,33 @@ struct MenuPanel: View {
         }
     }
 
-    private func groupSection(_ title: String, groups: [ListenerGroup]) -> some View {
+    private func groupSection(_ title: String, groups: [ListenerGroup], isProjectSection: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+            HStack {
+                Text(title.uppercased())
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isProjectSection && model.snapshot.closableProjectActivities.count >= 2 {
+                    Button {
+                        Task { await model.previewBatchCloseProjects() }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "xmark.circle")
+                            Text("Close All (\(model.snapshot.closableProjectPortCount))")
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color(nsColor: .systemRed))
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .disabled(model.isPreparingBatchClose || model.isClosing)
+                    .help("Gracefully close all \(model.snapshot.closableProjectPortCount) dev project ports")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
             groupRows(groups)
         }
     }
@@ -430,6 +453,9 @@ struct MenuPanel: View {
                 if let uptime = activity.process.uptime {
                     infoRow("Uptime", uptime)
                 }
+                if let mem = activity.process.memoryUsage {
+                    infoRow("Memory", mem)
+                }
                 infoRow("Executable", compactPath(activity.process.executablePath))
                 infoRow("Folder", compactPath(activity.process.cwd))
                 infoRow("Addresses", activity.listener.addresses.joined(separator: ", "))
@@ -495,6 +521,10 @@ struct MenuPanel: View {
                             if let uptime = group.primary.process.uptime {
                                 Text("•")
                                 Text("Up \(uptime)")
+                            }
+                            if let mem = group.primary.process.memoryUsage {
+                                Text("•")
+                                Text(mem)
                             }
                         }
                         .font(.callout)
@@ -586,6 +616,80 @@ struct MenuPanel: View {
                         Task { await model.confirmClose() }
                     } label: {
                         Text("Close PID \(plan.pid)")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(model.isClosing)
+                }
+                .padding(.top, 6)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 16)
+        }
+    }
+
+    private func batchReviewView(_ plans: [ClosePlan]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 13) {
+                Label("Close \(plans.count) Project Server\(plans.count == 1 ? "" : "s")?", systemImage: "door.left.hand.closed")
+                    .font(.title3).fontWeight(.semibold)
+                Text("This sends SIGTERM to each of the \(plans.count) project processes below. Application bundles and system services will not be affected.")
+                    .font(.callout)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(plans) { plan in
+                        HStack(spacing: 8) {
+                            Text(String(plan.port))
+                                .font(.system(.body, design: .monospaced))
+                                .fontWeight(.semibold)
+                                .frame(width: 48, alignment: .leading)
+                            ProcessIconView(activity: plan.activity, size: 18)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(plan.activity.inference.label)
+                                    .font(.system(size: 13, weight: .medium))
+                                HStack(spacing: 4) {
+                                    Text("\(plan.activity.process.command) (PID \(plan.pid))")
+                                    if let mem = plan.activity.process.memoryUsage {
+                                        Text("•")
+                                        Text(mem)
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if let uptime = plan.activity.process.compactUptime {
+                                Text(uptime)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                        if plan.id != plans.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+
+                if model.isClosing {
+                    ProgressView("Sending SIGTERM to project processes…")
+                        .padding(.top, 4)
+                }
+
+                HStack {
+                    Button("Cancel") { model.pendingBatchPlans = nil }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(model.isClosing)
+                    Spacer()
+                    Button(role: .destructive) {
+                        Task { await model.confirmBatchClose() }
+                    } label: {
+                        Text("Close All \(plans.count) Projects")
                     }
                     .buttonStyle(.bordered)
                     .tint(.red)
@@ -697,10 +801,14 @@ struct MenuPanel: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(model.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not yet scanned")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
+            LaunchAtLoginToggle()
+            Text("•")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             Button("Quit") { NSApp.terminate(nil) }
                 .buttonStyle(.plain)
                 .focusable(false)
@@ -710,6 +818,29 @@ struct MenuPanel: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
+    }
+}
+
+private struct LaunchAtLoginToggle: View {
+    @ObservedObject private var manager = LaunchAtLoginManager.shared
+
+    var body: some View {
+        Button {
+            manager.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: manager.isEnabled ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(manager.isEnabled ? Color(nsColor: .systemGreen) : Color.secondary)
+                Text("Start at Login")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .focusEffectDisabled()
+        .help(manager.isEnabled ? "LeftOpen starts automatically when you log in" : "Click to launch LeftOpen at login")
     }
 }
 

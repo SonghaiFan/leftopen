@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import LeftOpenCore
+import ServiceManagement
 import SwiftUI
 
 enum NoticeKind {
@@ -31,12 +32,43 @@ struct Notice {
 }
 
 @MainActor
+final class LaunchAtLoginManager: ObservableObject {
+    static let shared = LaunchAtLoginManager()
+
+    @Published var isEnabled: Bool = false
+
+    private init() {
+        checkStatus()
+    }
+
+    func checkStatus() {
+        isEnabled = SMAppService.mainApp.status == .enabled
+    }
+
+    func toggle() {
+        do {
+            if isEnabled {
+                try SMAppService.mainApp.unregister()
+                isEnabled = false
+            } else {
+                try SMAppService.mainApp.register()
+                isEnabled = true
+            }
+        } catch {
+            checkStatus()
+        }
+    }
+}
+
+@MainActor
 final class MenuModel: ObservableObject {
     @Published var snapshot = ScanSnapshot(activities: [], limitations: [])
     @Published var isRefreshing = false
     @Published var isPreparingClose = false
+    @Published var isPreparingBatchClose = false
     @Published var isClosing = false
     @Published var pendingPlan: ClosePlan?
+    @Published var pendingBatchPlans: [ClosePlan]?
     @Published private(set) var notice: Notice?
     @Published var selectedActivityID: String?
     @Published var lastRefresh: Date?
@@ -115,6 +147,50 @@ final class MenuModel: ObservableObject {
             let outcome = detail.hasPrefix("SIGTERM was sent") ? detail : "Close refused: \(detail)"
             await refresh()
             notice = Notice(kind: .warning, text: outcome)
+        }
+    }
+
+    func previewBatchCloseProjects() async {
+        guard !isPreparingBatchClose && !isClosing else { return }
+        isPreparingBatchClose = true
+        defer { isPreparingBatchClose = false }
+        notice = nil
+        do {
+            let projects = snapshot.closableProjectActivities
+            let plans = try await Task.detached(priority: .utility) {
+                try CloseService.prepareBatch(activities: projects)
+            }.value
+            if plans.isEmpty {
+                notice = Notice(kind: .warning, text: "No closable project servers found.")
+            } else {
+                pendingBatchPlans = plans
+            }
+        } catch {
+            notice = Notice(kind: .warning, text: "Batch close unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    func confirmBatchClose() async {
+        guard let plans = pendingBatchPlans, !isClosing else { return }
+        isClosing = true
+        defer { isClosing = false }
+        do {
+            let result = try await Task.detached(priority: .utility) {
+                try CloseService.executeBatch(plans)
+            }.value
+            pendingBatchPlans = nil
+            selectedActivityID = nil
+            await refresh()
+            if result.isAllSuccessful {
+                notice = Notice(kind: .success, text: "Closed \(result.successfulPlans.count) project server\(result.successfulPlans.count == 1 ? "" : "s").")
+            } else {
+                notice = Notice(kind: .warning, text: "Closed \(result.successfulPlans.count) of \(result.totalCount) servers. \(result.failedPlans.count) could not be closed.")
+            }
+        } catch {
+            pendingBatchPlans = nil
+            selectedActivityID = nil
+            await refresh()
+            notice = Notice(kind: .warning, text: "Batch close failed: \(error.localizedDescription)")
         }
     }
 }
