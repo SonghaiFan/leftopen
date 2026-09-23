@@ -41,7 +41,7 @@
 brew install --cask songhaifan/tap/leftopen
 ```
 
-Signed with a Developer ID and notarized by Apple; opens directly on macOS Sonoma (14.0+).
+Supports Apple Silicon and Intel Macs running macOS Sonoma (14.0+). The app and bundled CLI are universal binaries, signed with a Developer ID and notarized by Apple.
 
 ### Manual download
 

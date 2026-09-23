@@ -183,24 +183,38 @@ final class LeftOpenCoreTests: XCTestCase {
         let table = Scanner.parseProcessTable(withRss)
         XCTAssertEqual(table[1]?.uptime, "1d 16h")
         XCTAssertEqual(table[1]?.rssKB, 12500)
-        XCTAssertEqual(table[1]?.memoryUsage, "12 MB")
+        XCTAssertEqual(table[1]?.memoryUsage, "12.2 MB")
         XCTAssertEqual(table[500]?.uptime, "2h 15m")
         XCTAssertEqual(table[500]?.rssKB, 45000)
-        XCTAssertEqual(table[500]?.memoryUsage, "44 MB")
+        XCTAssertEqual(table[500]?.memoryUsage, "43.9 MB")
         XCTAssertEqual(table[600]?.rssKB, 1500000)
         XCTAssertEqual(table[600]?.memoryUsage, "1.4 GB")
     }
 
     func testBatchClosePlanPreparation() throws {
+        // Batch preparation verifies start times with ps, so its fixture PIDs must be alive.
+        let processes = [Process(), Process()]
+        defer {
+            for process in processes where process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+        for process in processes {
+            process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            process.arguments = ["60"]
+            try process.run()
+        }
+
         let uid = Int32(getuid())
-        let act1 = fixtureActivity(pid: 101, path: "/opt/local/bin/node", port: 3000, uid: uid)
-        let act2 = fixtureActivity(pid: 102, path: "/opt/local/bin/python", port: 8000, uid: uid)
+        let act1 = fixtureActivity(pid: processes[0].processIdentifier, path: "/opt/local/bin/node", port: 3000, uid: uid)
+        let act2 = fixtureActivity(pid: processes[1].processIdentifier, path: "/opt/local/bin/python", port: 8000, uid: uid)
         let protectedAct = fixtureActivity(pid: 103, path: "/usr/bin/python", port: 9000, uid: uid)
 
         let plans = try CloseService.prepareBatch(activities: [act1, act2, protectedAct])
         // protectedAct should be skipped
         XCTAssertEqual(plans.count, 2)
-        XCTAssertEqual(Set(plans.map(\.pid)), [101, 102])
+        XCTAssertEqual(Set(plans.map(\.pid)), Set(processes.map(\.processIdentifier)))
     }
 
     private func fixtureActivity(pid: Int32, path: String?, port: Int = 3000,

@@ -41,7 +41,7 @@
 brew install --cask songhaifan/tap/leftopen
 ```
 
-由 Apple Developer ID 签名并经 Apple 公证，在 macOS Sonoma (14.0+) 上下载即可直接打开。
+支持运行 macOS Sonoma (14.0+) 的 Apple Silicon 和 Intel Mac。App 与附带的 CLI 均为通用二进制，由 Apple Developer ID 签名并经 Apple 公证。
 
 ### 手动下载
 

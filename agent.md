@@ -8,9 +8,9 @@ This document defines the end-to-end publishing workflow for LeftOpen. It is des
 
 Ensure the following tools, credentials, and permissions are available before initiating a release:
 
-- **Operating System**: macOS Sonoma 14.0 or later on Apple Silicon (`arm64`).
+- **Operating System**: macOS Sonoma 14.0 or later on an Apple Silicon or Intel Mac.
 - **Build Tools**:
-  - Xcode Command Line Tools (`swift`, `codesign`, `xcrun`, `ditto`, `plutil`).
+  - Xcode Command Line Tools (`swift`, `codesign`, `xcrun`, `ditto`, `plutil`, `lipo`) with support for both `arm64` and `x86_64` macOS targets.
   - GitHub CLI (`gh`), authenticated with repository write access to `SonghaiFan/leftopen`.
   - Homebrew (`brew`) installed.
 - **Signing and Notarization Credentials**:
@@ -28,8 +28,8 @@ Ensure the following tools, credentials, and permissions are available before in
 Define the target version and paths for the release:
 
 ```bash
-export NEW_VERSION="0.2.3"          # Semantic version (X.Y.Z)
-export NEW_BUILD="5"                # Monotonically increasing build integer
+export NEW_VERSION="0.3.2"          # Semantic version (X.Y.Z)
+export NEW_BUILD="9"                # Monotonically increasing build integer
 export LEFTOPEN_APP_IDENTITY="Developer ID Application: songhai fan (3XYUL6YP53)"
 export LEFTOPEN_NOTARY_PROFILE="leftopen-notary"
 export LEFTOPEN_BUNDLE_ID="app.leftopen.mac"
@@ -84,8 +84,8 @@ Update version strings across project files:
 4. **`src/cli.ts`**:
    - Update version string to `"${NEW_VERSION}"`.
 
-5. **`docs/index.html`**:
-   - Update the manual download link: `LeftOpen.zip (v${NEW_VERSION})`.
+5. **`README.md`, `README.zh-CN.md`, and `docs/index.html`**:
+   - Keep installation requirements current. The manual download links use GitHub's latest release, so they do not require a version bump.
 
 ---
 
@@ -94,7 +94,7 @@ Update version strings across project files:
 Build the release binaries and assemble the `.app` bundle:
 
 ```bash
-# Build app bundle and embed CLI binary
+# Build universal app and CLI binaries and assemble the bundle
 LEFTOPEN_OUTPUT_DIR="$LEFTOPEN_OUTPUT_DIR" Scripts/build-app.sh
 ```
 
@@ -103,6 +103,13 @@ LEFTOPEN_OUTPUT_DIR="$LEFTOPEN_OUTPUT_DIR" Scripts/build-app.sh
 - Both executables present in `Contents/MacOS`:
   - `LeftOpen.app/Contents/MacOS/LeftOpenApp` (GUI menu bar app)
   - `LeftOpen.app/Contents/MacOS/leftopen` (native CLI binary)
+- Both executables contain `arm64` and `x86_64` slices, supporting Apple Silicon and Intel Macs on macOS 14.0 or later. Verify before signing:
+
+  ```bash
+  Scripts/verify-universal-app.sh "${LEFTOPEN_OUTPUT_DIR}/LeftOpen.app"
+  ```
+
+  The build and signing scripts also run this check automatically and reject an app missing either architecture or executable.
 
 ---
 
@@ -119,8 +126,8 @@ Scripts/sign-and-notarize.sh
 ```
 
 **Underlying Actions**:
-1. Codesigns `${app_path}/Contents/MacOS/*` individually with `--options runtime --timestamp`.
-2. Codesigns the top-level `LeftOpen.app`.
+1. Codesigns the bundled `${app_path}/Contents/MacOS/leftopen` CLI with `--options runtime --timestamp`.
+2. Codesigns the top-level `LeftOpen.app` and its main executable with `--options runtime --timestamp`.
 3. Submits `LeftOpen-notarization.zip` via `xcrun notarytool submit --keychain-profile leftopen-notary --wait`.
 4. Staples ticket via `xcrun stapler staple LeftOpen.app`.
 5. Validates Gatekeeper assessment via `spctl --assess --type execute -vv LeftOpen.app`.
@@ -163,7 +170,7 @@ gh release create "v${NEW_VERSION}" LeftOpen.zip \
   --title "v${NEW_VERSION} - Native leftopen CLI & App Bundle" \
   --notes "LeftOpen ${NEW_VERSION}
 
-- Native leftopen CLI bundled inside application
+- Universal app and bundled CLI for Apple Silicon and Intel Macs (macOS 14+)
 - Signed with Developer ID and notarized by Apple
 - Install via Homebrew: brew install --cask songhaifan/tap/leftopen"
 ```
@@ -228,9 +235,13 @@ Verify distribution channels and local tools:
    curl -sI https://songhaifan.github.io/leftopen/ | grep -E "HTTP/|last-modified"
    ```
 
-3. **Update Local CLI**:
+3. **Verify Published Architectures**:
+   - Download the published `LeftOpen.zip`, extract it into a new directory, and run `Scripts/verify-universal-app.sh /path/to/extracted/LeftOpen.app` to check both executables.
+   - Test the app and CLI on Apple Silicon and Intel Macs when available. Record hardware coverage separately from build and signing verification; an `x86_64` run under Rosetta is useful but does not replace an Intel hardware check.
+
+4. **Update Local CLI**:
    ```bash
-   cp .build/release/leftopen ~/.local/bin/leftopen
+   cp "${LEFTOPEN_OUTPUT_DIR}/LeftOpen.app/Contents/MacOS/leftopen" ~/.local/bin/leftopen
    chmod +x ~/.local/bin/leftopen
    leftopen -v
    leftopen list

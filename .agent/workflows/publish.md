@@ -11,8 +11,8 @@ See root [`agent.md`](../../agent.md) for full documentation.
 
 ```bash
 # 1. Set environment variables
-export NEW_VERSION="0.2.3"
-export NEW_BUILD="5"
+export NEW_VERSION="0.3.2"
+export NEW_BUILD="9"
 export LEFTOPEN_APP_IDENTITY="Developer ID Application: songhai fan (3XYUL6YP53)"
 export LEFTOPEN_NOTARY_PROFILE="leftopen-notary"
 export LEFTOPEN_BUNDLE_ID="app.leftopen.mac"
@@ -21,10 +21,12 @@ export LEFTOPEN_OUTPUT_DIR="dist/v${NEW_VERSION}"
 # 2. Pre-flight tests
 swift test
 
-# 3. Bump version in Info.plist, main.swift, package.json, src/cli.ts, docs/index.html
+# 3. Bump version in Info.plist, main.swift, package.json, src/cli.ts
+# Keep README.md, README.zh-CN.md, and docs/index.html requirements current.
 
-# 4. Compile and package app bundle
+# 4. Compile and package universal app and CLI (arm64 + x86_64, macOS 14+)
 LEFTOPEN_OUTPUT_DIR="$LEFTOPEN_OUTPUT_DIR" Scripts/build-app.sh
+Scripts/verify-universal-app.sh "${LEFTOPEN_OUTPUT_DIR}/LeftOpen.app"
 
 # 5. Sign, notarize with Apple, and staple
 LEFTOPEN_OUTPUT_DIR="$LEFTOPEN_OUTPUT_DIR" \
@@ -56,4 +58,7 @@ gh release create "v${NEW_VERSION}" LeftOpen.zip \
 brew update && brew info --cask songhaifan/tap/leftopen
 brew fetch --cask songhaifan/tap/leftopen
 curl -sI https://songhaifan.github.io/leftopen/
+# Download and extract the published LeftOpen.zip into a new directory;
+# verify both executables contain arm64 + x86_64 with verify-universal-app.sh.
+# Record Apple Silicon/Intel hardware checks separately from Rosetta checks.
 ```
