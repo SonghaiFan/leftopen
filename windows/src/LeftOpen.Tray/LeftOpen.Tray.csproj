@@ -13,6 +13,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Version>0.1.0</Version>
+    <!-- Generated from the original repo artwork by Scripts\make-icon.ps1 -->
+    <ApplicationIcon>Assets\leftopen.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

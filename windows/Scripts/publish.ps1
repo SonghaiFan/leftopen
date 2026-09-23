@@ -1,5 +1,5 @@
 # Builds release artifacts for LeftOpen on Windows.
-# Usage: powershell -File Scripts\publish.ps1 [-OutputDir dist] [-SelfContained]
+# Usage: powershell -File windows\Scripts\publish.ps1 [-OutputDir windows\dist] [-SelfContained]
 #
 # Default: framework-dependent single-file executables (~1.5 MB each) — small and
 # fast to start, but require the .NET 8 runtime (SDK or Desktop Runtime).
@@ -7,12 +7,14 @@
 # a runtime, at the cost of size (WinForms cannot be trimmed).
 
 param(
-    [string]$OutputDir = "dist",
+    # Relative paths resolve against the repository root, not the current directory.
+    [string]$OutputDir = "windows\dist",
     [switch]$SelfContained
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = Split-Path -Parent $PSScriptRoot
+# This script lives in <repo>\windows\Scripts, so the repo root is two levels up.
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $repoRoot
 
 $common = @("-c", "Release", "-r", "win-x64", "-p:PublishSingleFile=true")
@@ -24,11 +26,11 @@ else {
 }
 
 Write-Host "==> Publishing CLI (leftopen.exe)..." -ForegroundColor Cyan
-dotnet publish "src\LeftOpen.Cli\LeftOpen.Cli.csproj" @common -o $OutputDir
+dotnet publish "windows\src\LeftOpen.Cli\LeftOpen.Cli.csproj" @common -o $OutputDir
 if ($LASTEXITCODE -ne 0) { throw "CLI publish failed." }
 
 Write-Host "==> Publishing tray app (LeftOpenApp.exe)..." -ForegroundColor Cyan
-dotnet publish "src\LeftOpen.Tray\LeftOpen.Tray.csproj" @common -o $OutputDir
+dotnet publish "windows\src\LeftOpen.Tray\LeftOpen.Tray.csproj" @common -o $OutputDir
 if ($LASTEXITCODE -ne 0) { throw "Tray publish failed." }
 
 Write-Host ""

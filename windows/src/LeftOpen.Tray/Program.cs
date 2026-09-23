@@ -13,13 +13,34 @@ static class Program
     /// mirroring leftopen's MenuBarExtra philosophy.
     /// </summary>
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        // Snapshot mode (mirrors the original repo's snapshot-panel script): render
+        // the panel with a real scan to a PNG and exit. Skips the single-instance
+        // handshake so it works even while the tray app is running.
+        if (args.Length == 2 && args[0] == "--snapshot")
+        {
+            ApplicationConfiguration.Initialize();
+            var snapshotPanel = new PanelForm(_ => { });
+            var path = Path.GetFullPath(args[1]);
+
+            // The awaits and BeginInvoke callbacks inside SnapshotAsync need a
+            // running message loop, so pump it via Application.Run and close the
+            // form (ending the loop) when the render is done.
+            _ = SnapshotAndQuit(snapshotPanel, path);
+            Application.Run(snapshotPanel);
+            return;
+        }
+
         using var singleInstance = new Mutex(true, @"Local\LeftOpenApp.SingleInstance", out var isFirst);
         if (!isFirst)
         {
             // Already running: ask that instance to open its panel (so a shortcut or
-            // a second launch brings the panel up instead of doing nothing).
+            // a second launch brings the panel up instead of doing nothing). Hand
+            // over the foreground right first — this process was started by the
+            // user, so it may call SetForegroundWindow while the running instance
+            // (signalled from a background thread) may not.
+            AllowSetForegroundWindow(AsfwAny);
             if (EventWaitHandle.TryOpenExisting(OpenPanelEventName, out var openEvent))
             {
                 openEvent.Set();
@@ -56,6 +77,44 @@ static class Program
         Application.Run(context);
         GC.KeepAlive(singleInstance);
     }
+
+    private const uint AsfwAny = 0xFFFFFFFF;
+
+    private static async Task SnapshotAndQuit(PanelForm panel, string path)
+    {
+        try
+        {
+            await panel.SnapshotAsync(path);
+
+            // Also dump the tray icon states next to the panel snapshot so the
+            // notification-area rendering can be inspected without hunting for the
+            // icon in the tray overflow.
+            var trayPath = Path.Combine(
+                Path.GetDirectoryName(path) ?? ".",
+                Path.GetFileNameWithoutExtension(path) + "-tray.png");
+            using var strip = new Bitmap(144, 48);
+            using (var g = Graphics.FromImage(strip))
+            {
+                g.Clear(Color.FromArgb(0x1F, 0x1F, 0x1F)); // dark taskbar
+                var frame = DoorMark.ThemeFrameColor();
+                using var closed = DoorMark.RenderTrayIcon(48, DoorMark.TrayState.Closed, 0, frame);
+                using var open = DoorMark.RenderTrayIcon(48, DoorMark.TrayState.Open, 3, frame);
+                using var error = DoorMark.RenderTrayIcon(48, DoorMark.TrayState.Error, 12, frame);
+                g.DrawIcon(closed, new Rectangle(0, 0, 48, 48));
+                g.DrawIcon(open, new Rectangle(48, 0, 48, 48));
+                g.DrawIcon(error, new Rectangle(96, 0, 48, 48));
+            }
+
+            strip.Save(trayPath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        finally
+        {
+            panel.Close();
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 }
 
 /// <summary>Owns the NotifyIcon for the whole app lifetime; the panel is created on demand.</summary>
@@ -79,7 +138,7 @@ internal sealed class TrayContext : ApplicationContext
 
         _notifyIcon = new NotifyIcon
         {
-            Icon = DoorIcon.Closed(32),
+            Icon = DoorMark.RenderTrayIcon(TrayIconSize(), DoorMark.TrayState.Closed, 0, DoorMark.ThemeFrameColor()),
             Text = "LeftOpen — 查看遗留进程",
             ContextMenuStrip = menu,
             Visible = true,
@@ -93,8 +152,20 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (e.Button == MouseButtons.Left)
         {
-            OpenPanel();
+            TogglePanel();
         }
+    }
+
+    /// <summary>Tray click toggles the panel, the way a menu bar icon does.</summary>
+    public void TogglePanel()
+    {
+        if (_panel.Visible)
+        {
+            _panel.HidePanel();
+            return;
+        }
+
+        OpenPanel();
     }
 
     /// <summary>Shows the panel, scanning only when the previous scan is stale. Safe from any thread.</summary>
@@ -116,21 +187,31 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        var closable = result.Activities
-            .Select(a => a.Facts.Process.Pid)
+        // Closable ports, the way the original counts them for its menu bar label.
+        var closablePorts = result.Activities
+            .Where(a => CloseService.DescribeClosability(a, _panel.CurrentUserSid, Environment.ProcessId, out _))
+            .Select(a => a.Facts.Listener.Port)
             .Distinct()
-            .Count(pid => result.Activities.Any(a =>
-                a.Facts.Process.Pid == pid &&
-                CloseService.DescribeClosability(a, _panel.CurrentUserSid, Environment.ProcessId, out _)));
+            .Count();
+        var failed = result.Activities.Count == 0 && result.Limitations.Any(l => l.StartsWith("扫描失败"));
+        var state = failed
+            ? DoorMark.TrayState.Error
+            : closablePorts > 0 ? DoorMark.TrayState.Open : DoorMark.TrayState.Closed;
 
         // Rebuild the tray icon for the current taskbar theme; dispose the old one.
         var old = _notifyIcon.Icon;
-        _notifyIcon.Icon = closable > 0 ? DoorIcon.Open(32) : DoorIcon.Closed(32);
+        _notifyIcon.Icon = DoorMark.RenderTrayIcon(TrayIconSize(), state, closablePorts, DoorMark.ThemeFrameColor());
         old?.Dispose();
-        _notifyIcon.Text = closable > 0
-            ? $"LeftOpen — {closable} 个可关闭的进程"
-            : "LeftOpen — localhost 干净";
+
+        _notifyIcon.Text = state switch
+        {
+            DoorMark.TrayState.Error => "LeftOpen — 扫描失败",
+            DoorMark.TrayState.Open => $"LeftOpen — {closablePorts} 个可关闭的端口",
+            _ => "LeftOpen — localhost 干净",
+        };
     }
+
+    private static int TrayIconSize() => Math.Max(SystemInformation.SmallIconSize.Width, 16);
 
     private void ToggleStartup()
     {

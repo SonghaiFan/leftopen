@@ -12,7 +12,7 @@ namespace LeftOpen.Tray;
 /// </summary>
 internal sealed class PanelForm : Form
 {
-    internal const int PanelWidth = 392;
+    internal const int PanelWidth = 480;
     private const int PanelHeight = 480;
 
     private readonly Action<ScanResult> _onScanFinished;
@@ -32,6 +32,8 @@ internal sealed class PanelForm : Form
     private Control? _currentView;
     private bool _notClosableExpanded;
     private string _searchText = "";
+    private DateTime _shownAt;
+    private bool _everActivated;
 
     public string? CurrentUserSid { get; } = WindowsIdentity.GetCurrent().User?.Value;
 
@@ -154,21 +156,89 @@ internal sealed class PanelForm : Form
     /// <summary>Opens the panel near the tray icon; scans on open, like MenuBarExtra.</summary>
     public void OpenFromTray(bool rescan)
     {
-        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        var area = TrayWorkingArea();
         Location = new Point(area.Right - Width - 12, area.Bottom - Height - 12);
+
+        _shownAt = DateTime.Now;
+        _everActivated = false;
 
         Show();
         Activate();
+
+        // Activate() can be refused by the Windows foreground lock when the trigger
+        // came from a background process; ask explicitly so the panel actually takes
+        // focus and its own focus-lost rule does not hide it again immediately.
+        SetForegroundWindow(Handle);
+
         if (rescan)
         {
             Scan();
         }
     }
 
+    /// <summary>
+    /// The working area of the display that owns the taskbar — the panel must appear
+    /// next to the tray icon, not next to wherever the mouse happens to be.
+    /// </summary>
+    private static Rectangle TrayWorkingArea()
+    {
+        var taskbar = FindWindow("Shell_TrayWnd", null);
+        if (taskbar != IntPtr.Zero && GetWindowRect(taskbar, out var rect))
+        {
+            return Screen.FromRectangle(Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom)).WorkingArea;
+        }
+
+        return Screen.PrimaryScreen?.WorkingArea ?? Screen.FromPoint(Cursor.Position).WorkingArea;
+    }
+
+    /// <summary>Hides the panel (used when the tray icon is clicked while it is open).</summary>
+    public void HidePanel() => Hide();
+
+    /// <summary>
+    /// Renders the panel (with a real scan) to a PNG — the Windows counterpart of the
+    /// original repo's snapshot-panel script, used to check the layout deterministically.
+    /// </summary>
+    public async Task SnapshotAsync(string path)
+    {
+        // Off-screen so the snapshot never disturbs whatever the user is doing.
+        Location = new Point(-6000, -6000);
+        Show();
+        Scan();
+
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (_scanning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        // Let the row icons finish loading asynchronously (project icons, live
+        // favicon probes) before rendering.
+        await Task.Delay(4000);
+
+        using var bitmap = new Bitmap(Width, Height);
+        DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height));
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Hide();
+    }
+
+    protected override void OnActivated(EventArgs e)
+    {
+        _everActivated = true;
+        base.OnActivated(e);
+    }
+
     private void OnDeactivated(object? sender, EventArgs e)
     {
         // During confirm/progress views we must not vanish while a sub-dialog has focus.
         if (_currentView is { Name: "confirmView" or "progressView" })
+        {
+            return;
+        }
+
+        // A panel that never received focus has nothing to hide from — hiding here is
+        // what made it flash and vanish when Windows refused the focus change. Ignore
+        // the focus churn that happens right after showing, too.
+        if (!_everActivated || DateTime.Now - _shownAt < TimeSpan.FromMilliseconds(400))
         {
             return;
         }
@@ -246,7 +316,7 @@ internal sealed class PanelForm : Form
         var bitmap = new Bitmap(26, 26);
         using var g = Graphics.FromImage(bitmap);
         g.Clear(Color.Transparent);
-        DoorIcon.Paint(g, new Rectangle(0, 0, 26, 26), open, SystemColors.ControlText);
+        DoorMark.Paint(g, new RectangleF(0, 0, 26, 26), open, SystemColors.ControlText);
         return bitmap;
     }
 
@@ -386,8 +456,8 @@ internal sealed class PanelForm : Form
             {
                 Text = "⚠ " + string.Join("  ", _result.Limitations),
                 AutoSize = true,
-                MaximumSize = new Size(PanelWidth - 40, 0),
-                Margin = new Padding(16, 12, 16, 0),
+                MaximumSize = new Size(PanelWidth - 90, 0),
+                Margin = new Padding(14, 12, 14, 0),
                 ForeColor = Color.FromArgb(150, 110, 20),
             });
         }
@@ -675,5 +745,23 @@ internal sealed class PanelForm : Form
         }
 
         return $"{(int)span.TotalDays}天{(int)span.TotalHours % 24}小时";
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string className, string? windowName);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 }

@@ -26,9 +26,11 @@ internal sealed class GroupRowControl : Panel
         _openDetail = openDetail;
         _requestClose = requestClose;
 
-        const int width = PanelForm.PanelWidth;
+        // Right-hand columns anchor to the row's own width, which is the panel width
+        // minus the flow panel's vertical scrollbar and the row margins.
+        const int rowWidth = PanelForm.PanelWidth - 48;
         Height = 54;
-        Width = width - 26;
+        Width = rowWidth;
         Margin = new Padding(14, 2, 14, 2);
         BackColor = SystemColors.Window;
         Cursor = Cursors.Hand;
@@ -38,14 +40,55 @@ internal sealed class GroupRowControl : Panel
         AccessibleName = $"端口 {string.Join(", ", group.Ports)} · {group.Label} · PID {group.Pid}";
         AccessibleDescription = group.Closable ? "打开详情" : $"不可关闭：{group.RefusalReason}";
 
+        // Layout — main line: icon | owner | LAN | ✕
+        //          sub line:  port +N · command · pid | uptime
+        // The icon leads the row so it sits on the same line as the process name,
+        // and the owner label gets the width it needs for long project names.
+        _icon = new PictureBox
+        {
+            Size = new Size(24, 24),
+            Location = new Point(10, 4),
+            SizeMode = PictureBoxSizeMode.CenterImage,
+        };
+
+        var label = new Label
+        {
+            Text = TrimLabel(group.Label),
+            AutoSize = false,
+            Size = new Size(rowWidth - 136, 18),
+            Location = new Point(44, 6),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            ForeColor = SystemColors.ControlText,
+        };
+
         var port = new Label
         {
             Text = group.Ports[0].ToString(),
             AutoSize = false,
-            Size = new Size(66, 20),
-            Location = new Point(10, 8),
-            Font = new Font("Consolas", 11f, FontStyle.Bold),
+            Size = new Size(66, 18),
+            Location = new Point(44, 25),
+            Font = new Font("Consolas", 10.5f, FontStyle.Bold),
+            ForeColor = SystemColors.ControlText,
             TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        var sub = new Label
+        {
+            Text = $"· {TrimCommand(group.Command)} · {group.Pid}",
+            AutoSize = false,
+            Size = new Size(rowWidth - 216, 16),
+            Location = new Point(116, 27),
+            ForeColor = SystemColors.GrayText,
+        };
+
+        var uptime = new Label
+        {
+            Text = group.StartTime != null ? DescribeDuration(DateTime.Now - group.StartTime.Value) : "—",
+            AutoSize = false,
+            Size = new Size(88, 16),
+            Location = new Point(rowWidth - 96, 27),
+            ForeColor = SystemColors.GrayText,
+            TextAlign = ContentAlignment.MiddleRight,
         };
 
         if (group.Ports.Count > 1)
@@ -54,8 +97,8 @@ internal sealed class GroupRowControl : Panel
             {
                 Text = $"+{group.Ports.Count - 1}",
                 AutoSize = false,
-                Size = new Size(30, 16),
-                Location = new Point(76, 10),
+                Size = new Size(28, 15),
+                Location = new Point(112, 26),
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 BackColor = SystemColors.ControlLight,
                 ForeColor = SystemColors.GrayText,
@@ -64,42 +107,6 @@ internal sealed class GroupRowControl : Panel
             Controls.Add(more);
         }
 
-        _icon = new PictureBox
-        {
-            Size = new Size(24, 24),
-            Location = new Point(10, 24),
-            SizeMode = PictureBoxSizeMode.CenterImage,
-        };
-
-        var label = new Label
-        {
-            Text = TrimLabel(group.Label),
-            AutoSize = false,
-            Size = new Size(width - 210, 18),
-            Location = new Point(112, 7),
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            ForeColor = SystemColors.ControlText,
-        };
-
-        var sub = new Label
-        {
-            Text = $"{TrimCommand(group.Command)} · PID {group.Pid}",
-            AutoSize = false,
-            Size = new Size(width - 272, 16),
-            Location = new Point(112, 27),
-            ForeColor = SystemColors.GrayText,
-        };
-
-        var uptime = new Label
-        {
-            Text = group.StartTime != null ? DescribeDuration(DateTime.Now - group.StartTime.Value) : "—",
-            AutoSize = false,
-            Size = new Size(56, 34),
-            Location = new Point(width - 216, 16),
-            ForeColor = SystemColors.GrayText,
-            TextAlign = ContentAlignment.MiddleRight,
-        };
-
         if (group.AnyLan)
         {
             var lan = new Label
@@ -107,7 +114,7 @@ internal sealed class GroupRowControl : Panel
                 Text = "LAN",
                 AutoSize = false,
                 Size = new Size(34, 16),
-                Location = new Point(width - 158, 25),
+                Location = new Point(rowWidth - 84, 8),
                 BackColor = Color.FromArgb(255, 235, 205),
                 ForeColor = Color.FromArgb(150, 100, 20),
                 Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
@@ -123,7 +130,7 @@ internal sealed class GroupRowControl : Panel
             Font = new Font("Segoe UI", 10f, FontStyle.Bold),
             FlatStyle = FlatStyle.Flat,
             Size = new Size(32, 32),
-            Location = new Point(width - 114, 10),
+            Location = new Point(rowWidth - 44, 4),
             ForeColor = Color.FromArgb(190, 60, 50),
             Visible = false,
             TabStop = false,
@@ -156,11 +163,11 @@ internal sealed class GroupRowControl : Panel
         MouseClick += OnRowMouseClick;
         label.MouseClick += OnRowMouseClick;
 
-        // Icon loading touches the filesystem; do it off the hot path so the
-        // panel renders instantly.
+        // Icon loading touches the filesystem and possibly the running server; do it
+        // off the hot path so the panel renders instantly.
         _ = Task.Run(() =>
         {
-            var image = AppIcons.Resolve(group.ExecutablePath, group.ProjectRoot, 24);
+            var image = AppIcons.Resolve(group.ExecutablePath, group.ProjectRoot, group.Ports[0], group.Category, group.Command, 24);
             BeginInvoke(() =>
             {
                 if (!IsDisposed)
@@ -220,7 +227,7 @@ internal sealed class GroupRowControl : Panel
 
     private static void CopyToClipboard(string text) => Clipboard.SetText(text);
 
-    private static string TrimLabel(string label) => label.Length <= 34 ? label : label[..33] + "…";
+    private static string TrimLabel(string label) => label.Length <= 40 ? label : label[..39] + "…";
 
     private static string TrimCommand(string command) => command.Length <= 28 ? command : command[..27] + "…";
 
