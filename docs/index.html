@@ -92,7 +92,7 @@
       .top { min-height: 60px; gap: 12px; }
       .nav { gap: 13px; font-size: 12px; }
       .nav .release { display: none; }
-      .hero { grid-template-columns: 1fr; min-height: 0; gap: 42px; padding: 56px 0 64px; }
+      .hero { grid-template-columns: minmax(0, 1fr); min-height: 0; gap: 42px; padding: 56px 0 64px; }
       h1 { font-size: clamp(40px, 12vw, 54px); }
       .intro { font-size: 18px; }
       .shot { justify-self: center; width: min(100%, 340px); }
@@ -130,6 +130,8 @@
           <div class="install"><code><span class="prompt">$ </span>brew install --cask songhaifan/tap/leftopen</code><button id="copy" type="button" aria-label="Copy install command"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
           <p class="alternate" lang="zh">也可从 <a href="https://github.com/SonghaiFan/leftopen/releases/latest">GitHub Releases</a> 下载。</p>
           <p class="alternate" lang="en">Or download it from <a href="https://github.com/SonghaiFan/leftopen/releases/latest">GitHub Releases</a>.</p>
+          <p class="alternate" lang="zh">支持 Apple Silicon 和 Intel Mac · macOS 14+</p>
+          <p class="alternate" lang="en">Apple Silicon and Intel Macs · macOS 14+</p>
         </div>
         <figure class="shot"><picture><source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)"><img src="assets/preview.png" width="375" height="460" alt="The LeftOpen menu bar panel showing listening ports and their owners"></picture></figure>
       </section>

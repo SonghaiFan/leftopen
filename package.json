@@ -1,6 +1,6 @@
 {
   "name": "leftopen-prototype",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "See what your tools left running on localhost.",
   "type": "module",

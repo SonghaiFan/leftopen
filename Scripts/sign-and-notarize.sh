@@ -25,13 +25,12 @@ if [[ "$actual_bundle_id" != "$LEFTOPEN_BUNDLE_ID" ]]; then
   exit 1
 fi
 
-for bin in "${app_path}/Contents/MacOS"/*; do
-  if [[ -f "$bin" && -x "$bin" ]]; then
-    codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "$bin"
-  fi
-done
+"${project_dir}/Scripts/verify-universal-app.sh" "$app_path"
+
+# The CLI is nested code; signing the bundle also signs LeftOpenApp.
+codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "${app_path}/Contents/MacOS/leftopen"
 codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "$app_path"
-codesign --verify --strict --verbose=2 "$app_path"
+codesign --verify --deep --strict --all-architectures --verbose=2 "$app_path"
 ditto -c -k --keepParent "$app_path" "$zip_path"
 xcrun notarytool submit "$zip_path" --keychain-profile "$LEFTOPEN_NOTARY_PROFILE" --wait
 xcrun stapler staple "$app_path"
