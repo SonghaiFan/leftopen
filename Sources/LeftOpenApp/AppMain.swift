@@ -158,21 +158,6 @@ final class MenuModel: ObservableObject {
         await execute(plan)
     }
 
-    /// Swipe-to-close: the swipe past the threshold is the confirmation, so the plan is prepared
-    /// and executed without the review page. Identity checks in CloseService still apply.
-    func closeNow(_ activity: Activity) async {
-        guard !isPreparingClose && !isClosing else { return }
-        notice = nil
-        do {
-            let plan = try await Task.detached(priority: .utility) {
-                try CloseService.prepare(port: activity.listener.port, pid: activity.process.pid)
-            }.value
-            await execute(plan)
-        } catch {
-            post(Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)"))
-        }
-    }
-
     private func execute(_ plan: ClosePlan) async {
         isClosing = true
         defer { isClosing = false }
