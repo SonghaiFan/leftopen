@@ -27,6 +27,7 @@ enum NoticeKind {
 }
 
 struct Notice {
+    let id = UUID()
     let kind: NoticeKind
     let text: String
 }
@@ -73,19 +74,55 @@ final class MenuModel: ObservableObject {
     @Published var selectedActivityID: String?
     @Published var lastRefresh: Date?
 
-    var portCount: Int { snapshot.portCount }
-    var projectPortCount: Int { snapshot.projectPortCount }
-    var closablePortCount: Int { snapshot.closablePortCount }
-    var hasOpenDoors: Bool { snapshot.hasOpenDoors }
+    private var refreshLoop: Task<Void, Never>?
+    private var settingsObserver: AnyCancellable?
+
+    /// The scan minus ports the user chose to ignore, so every count agrees with the list.
+    var visible: ScanSnapshot {
+        let ignored = AppSettings.shared.ignoredPorts
+        guard !ignored.isEmpty else { return snapshot }
+        return ScanSnapshot(
+            activities: snapshot.activities.filter { !ignored.contains($0.listener.port) },
+            limitations: snapshot.limitations
+        )
+    }
+
+    var portCount: Int { visible.portCount }
+    var lanPortCount: Int { visible.lanPortCount }
+    var closablePortCount: Int { visible.closablePortCount }
+    var hasOpenDoors: Bool { visible.hasOpenDoors }
 
     init() {
-        Task {
-            await refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                guard !Task.isCancelled else { break }
-                await refresh()
+        Task { await refresh() }
+        scheduleRefresh(AppSettings.shared.refreshInterval)
+        settingsObserver = AppSettings.shared.$refreshInterval
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] interval in
+                MainActor.assumeIsolated { self?.scheduleRefresh(interval) }
             }
+    }
+
+    private func scheduleRefresh(_ interval: RefreshInterval) {
+        refreshLoop?.cancel()
+        refreshLoop = nil
+        guard interval != .manual else { return }
+        refreshLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval.rawValue))
+                guard !Task.isCancelled else { return }
+                await self?.refresh()
+            }
+        }
+    }
+
+    /// Success notices fade on their own; warnings and errors stay until the next action.
+    private func post(_ notice: Notice) {
+        self.notice = notice
+        guard notice.kind == .success else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            if self?.notice?.id == notice.id { self?.notice = nil }
         }
     }
 
@@ -98,7 +135,7 @@ final class MenuModel: ObservableObject {
             lastRefresh = Date()
             notice = nil
         } catch {
-            notice = Notice(kind: .error, text: "Scan failed: \(error.localizedDescription)")
+            post(Notice(kind: .error, text: "Scan failed: \(error.localizedDescription)"))
         }
     }
 
@@ -112,12 +149,31 @@ final class MenuModel: ObservableObject {
                 try CloseService.prepare(port: activity.listener.port, pid: activity.process.pid)
             }.value
         } catch {
-            notice = Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)")
+            post(Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)"))
         }
     }
 
     func confirmClose() async {
         guard let plan = pendingPlan, !isClosing else { return }
+        await execute(plan)
+    }
+
+    /// Swipe-to-close: the swipe past the threshold is the confirmation, so the plan is prepared
+    /// and executed without the review page. Identity checks in CloseService still apply.
+    func closeNow(_ activity: Activity) async {
+        guard !isPreparingClose && !isClosing else { return }
+        notice = nil
+        do {
+            let plan = try await Task.detached(priority: .utility) {
+                try CloseService.prepare(port: activity.listener.port, pid: activity.process.pid)
+            }.value
+            await execute(plan)
+        } catch {
+            post(Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)"))
+        }
+    }
+
+    private func execute(_ plan: ClosePlan) async {
         isClosing = true
         defer { isClosing = false }
         do {
@@ -139,14 +195,14 @@ final class MenuModel: ObservableObject {
                 kind = .warning
             }
             await refresh()
-            notice = Notice(kind: kind, text: outcome)
+            post(Notice(kind: kind, text: outcome))
         } catch {
             pendingPlan = nil
             selectedActivityID = nil
             let detail = error.localizedDescription
             let outcome = detail.hasPrefix("SIGTERM was sent") ? detail : "Close refused: \(detail)"
             await refresh()
-            notice = Notice(kind: .warning, text: outcome)
+            post(Notice(kind: .warning, text: outcome))
         }
     }
 
@@ -156,17 +212,17 @@ final class MenuModel: ObservableObject {
         defer { isPreparingBatchClose = false }
         notice = nil
         do {
-            let projects = snapshot.closableProjectActivities
+            let projects = visible.closableProjectActivities
             let plans = try await Task.detached(priority: .utility) {
                 try CloseService.prepareBatch(activities: projects)
             }.value
             if plans.isEmpty {
-                notice = Notice(kind: .warning, text: "No closable project servers found.")
+                post(Notice(kind: .warning, text: "No closable project servers found."))
             } else {
                 pendingBatchPlans = plans
             }
         } catch {
-            notice = Notice(kind: .warning, text: "Batch close unavailable: \(error.localizedDescription)")
+            post(Notice(kind: .warning, text: "Batch close unavailable: \(error.localizedDescription)"))
         }
     }
 
@@ -182,22 +238,30 @@ final class MenuModel: ObservableObject {
             selectedActivityID = nil
             await refresh()
             if result.isAllSuccessful {
-                notice = Notice(kind: .success, text: "Closed \(result.successfulPlans.count) project server\(result.successfulPlans.count == 1 ? "" : "s").")
+                post(Notice(kind: .success, text: "Closed \(result.successfulPlans.count) project server\(result.successfulPlans.count == 1 ? "" : "s")."))
             } else {
-                notice = Notice(kind: .warning, text: "Closed \(result.successfulPlans.count) of \(result.totalCount) servers. \(result.failedPlans.count) could not be closed.")
+                post(Notice(kind: .warning, text: "Closed \(result.successfulPlans.count) of \(result.totalCount) servers. \(result.failedPlans.count) could not be closed."))
             }
         } catch {
             pendingBatchPlans = nil
             selectedActivityID = nil
             await refresh()
-            notice = Notice(kind: .warning, text: "Batch close failed: \(error.localizedDescription)")
+            post(Notice(kind: .warning, text: "Batch close failed: \(error.localizedDescription)"))
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 }
 
 @main
 struct LeftOpenApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = MenuModel()
+    @ObservedObject private var settings = AppSettings.shared
 
     init() {
         PanelSnapshot.runIfRequested(model: MenuModel())
@@ -210,19 +274,25 @@ struct LeftOpenApp: App {
             HStack(spacing: 3) {
                 if model.notice?.kind == .error {
                     Image(systemName: "exclamationmark.triangle")
-                    Text(model.lastRefresh == nil ? "?" : String(model.portCount))
-                        .monospacedDigit()
-                } else if model.hasOpenDoors {
-                    Image(systemName: "door.left.hand.open")
-                    Text(String(model.closablePortCount))
-                        .monospacedDigit()
                 } else {
-                    Image(systemName: "door.left.hand.closed")
+                    Image(nsImage: model.hasOpenDoors ? MenuBarDoor.open : MenuBarDoor.closed)
+                }
+                if let badgeCount {
+                    Text(String(badgeCount)).monospacedDigit()
                 }
             }
             .accessibilityLabel(accessibilityLabel)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    private var badgeCount: Int? {
+        let count = switch settings.menuBarBadgeMode {
+        case .closable: model.closablePortCount
+        case .all: model.portCount
+        case .none: 0
+        }
+        return count > 0 ? count : nil
     }
 
     private var accessibilityLabel: String {

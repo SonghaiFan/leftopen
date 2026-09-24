@@ -28,8 +28,8 @@ Ensure the following tools, credentials, and permissions are available before in
 Define the target version and paths for the release:
 
 ```bash
-export NEW_VERSION="0.3.2"          # Semantic version (X.Y.Z)
-export NEW_BUILD="9"                # Monotonically increasing build integer
+export NEW_VERSION="0.3.3"          # Semantic version (X.Y.Z)
+export NEW_BUILD="10"                # Monotonically increasing build integer
 export LEFTOPEN_APP_IDENTITY="Developer ID Application: songhai fan (3XYUL6YP53)"
 export LEFTOPEN_NOTARY_PROFILE="leftopen-notary"
 export LEFTOPEN_BUNDLE_ID="app.leftopen.mac"

@@ -11,8 +11,8 @@ See root [`agent.md`](../../agent.md) for full documentation.
 
 ```bash
 # 1. Set environment variables
-export NEW_VERSION="0.3.2"
-export NEW_BUILD="9"
+export NEW_VERSION="0.3.3"
+export NEW_BUILD="10"
 export LEFTOPEN_APP_IDENTITY="Developer ID Application: songhai fan (3XYUL6YP53)"
 export LEFTOPEN_NOTARY_PROFILE="leftopen-notary"
 export LEFTOPEN_BUNDLE_ID="app.leftopen.mac"

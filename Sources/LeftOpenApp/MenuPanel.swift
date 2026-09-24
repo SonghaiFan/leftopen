@@ -4,9 +4,14 @@ import SwiftUI
 
 struct MenuPanel: View {
     @ObservedObject var model: MenuModel
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
-    @State private var selectedGroupID: String?
+    @State private var expandedGroupIDs: Set<String> = []
+    /// How many of each unfolded group's extra rows are currently shown; stepped one at a time.
+    @State private var revealedCounts: [String: Int] = [:]
+    @State private var foldTasks: [String: Task<Void, Never>] = [:]
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
     @State private var protectedExpanded: Bool
@@ -17,14 +22,17 @@ struct MenuPanel: View {
         _protectedExpanded = State(initialValue: protectedExpanded)
     }
 
+    // MARK: - Data
+
     private var selectedActivity: Activity? {
         model.snapshot.activities.first { $0.id == model.selectedActivityID }
     }
 
     private var filteredActivities: [Activity] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Ignored ports stay out of the list unless a search asks for them.
+        guard !search.isEmpty else { return model.visible.activities }
         return model.snapshot.activities.filter { activity in
-            guard !search.isEmpty else { return true }
             let fields = [
                 String(activity.listener.port), String(activity.process.pid),
                 activity.inference.label, activity.process.command,
@@ -53,293 +61,6 @@ struct MenuPanel: View {
     }
     private var protectedGroups: [ListenerGroup] { listenerGroups(from: protectedActivities) }
 
-    private var selectedProcessGroup: ListenerGroup? {
-        guard let selectedGroupID else { return nil }
-        return listenerGroups(from: model.snapshot.activities)
-            .first { $0.id == selectedGroupID }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            if let notice = model.notice { noticeView(notice) }
-            if let plans = model.pendingBatchPlans {
-                batchReviewView(plans)
-            } else if let plan = model.pendingPlan {
-                reviewView(plan)
-            } else if let activity = selectedActivity {
-                detailView(activity)
-            } else if let group = selectedProcessGroup {
-                processDetailView(group)
-            } else if model.selectedActivityID != nil || selectedGroupID != nil {
-                vanishedView
-            } else {
-                listView
-            }
-            Divider()
-            footer
-        }
-        .frame(width: 375, height: 460)
-        .background(colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor))
-        .task { await model.refresh() }
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if model.pendingBatchPlans != nil || model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
-                Button {
-                    if model.pendingBatchPlans != nil {
-                        model.pendingBatchPlans = nil
-                    } else if model.pendingPlan != nil {
-                        model.pendingPlan = nil
-                    } else if model.selectedActivityID != nil {
-                        model.selectedActivityID = nil
-                    } else {
-                        selectedGroupID = nil
-                    }
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .focusEffectDisabled()
-                .accessibilityLabel(model.pendingPlan == nil && model.pendingBatchPlans == nil ? "Back to ports" : "Back to port details")
-                .help(model.pendingPlan == nil && model.pendingBatchPlans == nil ? "Back to ports" : "Back to port details")
-                .disabled(model.isClosing)
-            }
-            DoorMark(isOpen: model.hasOpenDoors)
-                .frame(width: 18, height: 30)
-                .accessibilityHidden(true)
-            if model.pendingBatchPlans != nil || model.pendingPlan != nil || model.selectedActivityID != nil || selectedGroupID != nil {
-                Text("LeftOpen").font(.headline)
-            } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("LeftOpen").font(.headline)
-                    HStack(spacing: 5) {
-                        if model.hasOpenDoors {
-                            Text("\(model.closablePortCount) open")
-                                .fontWeight(.medium)
-                            Text("•")
-                        } else {
-                            Text("All doors closed")
-                            Text("•")
-                        }
-                        Text("\(model.portCount) listening")
-                        if model.snapshot.lanPortCount > 0 {
-                            Text("•")
-                            Label("\(model.snapshot.lanPortCount) LAN", systemImage: "globe")
-                                .foregroundStyle(Color(nsColor: .systemOrange))
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityElement(children: .combine)
-                    .help("LAN-facing means a non-loopback bind address was observed. Firewall and actual reachability were not checked.")
-                }
-            }
-            Spacer()
-            if model.pendingPlan == nil && model.pendingBatchPlans == nil {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    if model.isRefreshing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .accessibilityLabel("Refresh listening ports")
-                .help("Refresh now (⌘R)")
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(model.isRefreshing || model.isClosing)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    private func noticeView(_ notice: Notice) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: notice.kind.symbol)
-                .foregroundStyle(notice.kind.color)
-            Text(notice.text).font(.callout).foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var listView: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                TextField("Search port, process, or PID", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.callout)
-                    .focused($searchFocused)
-                    .onAppear {
-                        DispatchQueue.main.async {
-                            searchFocused = true
-                        }
-                    }
-                    .accessibilityLabel("Search listening ports")
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .focusEffectDisabled()
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-
-            if model.isRefreshing && model.snapshot.activities.isEmpty {
-                ProgressView("Scanning this Mac…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredActivities.isEmpty {
-                emptyView
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if !projectGroups.isEmpty {
-                            groupSection("Projects", groups: projectGroups, isProjectSection: true)
-                        }
-                        if !serviceGroups.isEmpty {
-                            groupSection("Other Processes", groups: serviceGroups)
-                        }
-                        if !protectedGroups.isEmpty {
-                            protectedSection
-                        }
-                        if !model.snapshot.limitations.isEmpty {
-                            Divider().padding(.top, 4)
-                            DisclosureGroup("Scan limitations", isExpanded: $limitationsExpanded) {
-                                ForEach(model.snapshot.limitations, id: \.self) { limitation in
-                                    Text(limitation)
-                                        .font(.callout)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.top, 4)
-                                }
-                            }
-                            .font(.callout)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                        }
-                    }
-                }
-                .scrollIndicators(.automatic)
-            }
-        }
-    }
-
-    /// Apps and system services: not closable, so hidden behind a disclosure unless the
-    /// user is searching (a search that only matches protected ports must still show them).
-    private var protectedSection: some View {
-        let expanded = protectedExpanded || !query.isEmpty
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { protectedExpanded.toggle() }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                    Text("NOT CLOSABLE")
-                    Text("· \(protectedGroups.count) apps & system services")
-                        .fontWeight(.regular)
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .focusEffectDisabled()
-            .disabled(!query.isEmpty)
-            .accessibilityLabel("\(protectedGroups.count) not closable listeners, apps and system services")
-            .accessibilityHint(expanded ? "Collapses the list" : "Expands the list")
-            if expanded {
-                groupRows(protectedGroups)
-            }
-        }
-    }
-
-    private func groupSection(_ title: String, groups: [ListenerGroup], isProjectSection: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(title.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if isProjectSection && model.snapshot.closableProjectActivities.count >= 2 {
-                    Button {
-                        Task { await model.previewBatchCloseProjects() }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "xmark.circle")
-                            Text("Close All (\(model.snapshot.closableProjectPortCount))")
-                        }
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color(nsColor: .systemRed))
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .disabled(model.isPreparingBatchClose || model.isClosing)
-                    .help("Gracefully close all \(model.snapshot.closableProjectPortCount) dev project ports")
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-            groupRows(groups)
-        }
-    }
-
-    private func groupRows(_ groups: [ListenerGroup]) -> some View {
-        Group {
-            ForEach(groups) { group in
-                GroupRowItem(
-                    group: group,
-                    onSelect: {
-                        evidenceExpanded = false
-                        if group.ports.count == 1 {
-                            model.selectedActivityID = group.primary.id
-                        } else {
-                            selectedGroupID = group.id
-                        }
-                    },
-                    onClose: { activity in
-                        Task { await model.previewClose(activity) }
-                    },
-                    contextMenuContent: {
-                        contextMenu(for: group)
-                    }
-                )
-                if group.id != groups.last?.id {
-                    Divider().padding(.leading, 14)
-                }
-            }
-        }
-    }
-
     private func listenerGroups(from activities: [Activity]) -> [ListenerGroup] {
         var groups: [String: [Activity]] = [:]
         var orderedIDs: [String] = []
@@ -358,785 +79,1120 @@ struct MenuPanel: View {
         }
     }
 
+    // MARK: - Navigation
+    //
+    // Pages stack like a navigation controller: the list is always at the bottom and each step
+    // deeper (port → close review) slides in from the trailing edge. Lower pages stay
+    // alive underneath, so going back keeps the list's scroll position and search.
+
+    private enum Page: Hashable { case list, port, review }
+
+    private var path: [Page] {
+        var pages: [Page] = [.list]
+        if model.selectedActivityID != nil { pages.append(.port) }
+        if model.pendingPlan != nil || model.pendingBatchPlans != nil { pages.append(.review) }
+        return pages
+    }
+
+    private var depth: Int { path.count - 1 }
+
+    private var motion: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .snappy(duration: 0.32)
+    }
+
+    private var panelBackground: Color { panelSurface(colorScheme) }
+
+    private func goBack() {
+        if model.pendingBatchPlans != nil {
+            model.pendingBatchPlans = nil
+        } else if model.pendingPlan != nil {
+            model.pendingPlan = nil
+        } else {
+            model.selectedActivityID = nil
+        }
+    }
+
+    /// Multi-listener rows fold open in place rather than opening a page of their own. The
+    /// extra rows come out one after another from under the row above, and fold back in reverse.
+    private func toggle(_ group: ListenerGroup) {
+        let id = group.id
+        let total = group.activities.count - 1
+        let expanding = !expandedGroupIDs.contains(id)
+        withAnimation(rowMotion) {
+            if expanding { expandedGroupIDs.insert(id) } else { expandedGroupIDs.remove(id) }
+        }
+        foldTasks[id]?.cancel()
+        if reduceMotion {
+            withAnimation(rowMotion) { revealedCounts[id] = expanding ? total : 0 }
+            return
+        }
+        foldTasks[id] = Task {
+            var shown = revealedCounts[id] ?? 0
+            let target = expanding ? total : 0
+            while shown != target, !Task.isCancelled {
+                shown += expanding ? 1 : -1
+                withAnimation(rowMotion) { revealedCounts[id] = shown }
+                try? await Task.sleep(for: .milliseconds(45))
+            }
+        }
+    }
+
+    private var rowMotion: Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.26)
+    }
+
+    private func showDetails(_ activity: Activity) {
+        evidenceExpanded = false
+        model.selectedActivityID = activity.id
+    }
+
+    private func close(_ activity: Activity) {
+        Task { await model.previewClose(activity) }
+    }
+
+    private func closeNow(_ activity: Activity) {
+        Task { await model.closeNow(activity) }
+    }
+
+    // MARK: - Layout
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            if let notice = model.notice {
+                noticeView(notice)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            ZStack {
+                ForEach(Array(path.enumerated()), id: \.element) { index, page in
+                    let isTop = index == depth
+                    pageView(page)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .background(panelBackground)
+                        .offset(x: isTop || reduceMotion ? 0 : path.last == .review ? 56 : -56)
+                        .opacity(isTop ? 1 : 0)
+                        .disabled(!isTop)
+                        .accessibilityHidden(!isTop)
+                        .zIndex(Double(index))
+                        // The close review flies in from the leading edge, like the swipe that closes.
+                        .transition(reduceMotion ? .opacity : .move(edge: page == .review ? .leading : .trailing))
+                }
+            }
+            .clipped()
+            Divider()
+            footer
+        }
+        .frame(width: 375, height: 460)
+        .background(panelBackground)
+        .animation(motion, value: path)
+        .animation(motion, value: model.notice?.id)
+        .onChange(of: depth) { _, newDepth in
+            searchFocused = newDepth == 0
+        }
+        .task { await model.refresh() }
+    }
+
+    @ViewBuilder
+    private func pageView(_ page: Page) -> some View {
+        switch page {
+        case .list:
+            listPage
+        case .port:
+            if let activity = selectedActivity { portPage(activity) } else { vanishedPage }
+        case .review:
+            if let plans = model.pendingBatchPlans {
+                batchReviewPage(plans)
+            } else if let plan = model.pendingPlan {
+                reviewPage(plan)
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            if depth > 0 {
+                Button(action: goBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(QuietButtonStyle())
+                .quietFocus()
+                .keyboardShortcut(.cancelAction)
+                .disabled(model.isClosing)
+                .help("Back (Esc)")
+                .accessibilityLabel("Back")
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+            DoorMark(isOpen: model.hasOpenDoors)
+                .frame(width: 18, height: 30)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("LeftOpen").font(.headline)
+                statusLine
+            }
+            Spacer()
+            Button {
+                Task { await model.refresh() }
+            } label: {
+                ZStack {
+                    if model.isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                }
+                .frame(width: 22, height: 22)
+            }
+            .buttonStyle(QuietButtonStyle())
+            .quietFocus()
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(model.isRefreshing || model.isClosing)
+            .help("Refresh (⌘R)")
+            .accessibilityLabel("Refresh listening ports")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: 4) {
+            if model.hasOpenDoors {
+                Text("\(model.closablePortCount) open").fontWeight(.medium)
+            } else {
+                Text("All doors closed")
+            }
+            Text("·")
+            Text("\(model.portCount) listening")
+            if model.lanPortCount > 0 {
+                Text("·")
+                Text("\(model.lanPortCount) LAN")
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+                    .help("LAN-facing means a non-loopback bind address was observed. Firewall and actual reachability were not checked.")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func noticeView(_ notice: Notice) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: notice.kind.symbol)
+                .foregroundStyle(notice.kind.color)
+            Text(notice.text)
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(notice.kind.color.opacity(0.08))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 14) {
+            Text(model.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not yet scanned")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Settings…") { SettingsWindowController.shared.show() }
+                .keyboardShortcut(",", modifiers: .command)
+                .help("Settings (⌘,)")
+            Button("Quit") { NSApp.terminate(nil) }
+                .keyboardShortcut("q", modifiers: .command)
+                .help("Quit LeftOpen (⌘Q)")
+        }
+        .buttonStyle(QuietButtonStyle())
+        .quietFocus()
+        .font(.caption)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+    }
+
+    // MARK: - List Page
+
+    private var listPage: some View {
+        VStack(spacing: 0) {
+            searchField
+            if model.isRefreshing && model.snapshot.activities.isEmpty {
+                ProgressView("Scanning this Mac…")
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filteredActivities.isEmpty {
+                emptyView
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if !projectGroups.isEmpty {
+                            sectionHeader("Projects") {
+                                if model.visible.closableProjectActivities.count >= 2 {
+                                    Button("Close All…") {
+                                        Task { await model.previewBatchCloseProjects() }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .quietFocus()
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color(nsColor: .systemRed))
+                                    .disabled(model.isPreparingBatchClose || model.isClosing)
+                                    .help("Review closing all \(model.visible.closableProjectPortCount) project ports")
+                                }
+                            }
+                            groupRows(projectGroups)
+                        }
+                        if !serviceGroups.isEmpty {
+                            sectionHeader("Other Processes") { EmptyView() }
+                            groupRows(serviceGroups)
+                        }
+                        if !protectedGroups.isEmpty {
+                            protectedHeader
+                            if protectedExpanded || !query.isEmpty {
+                                groupRows(protectedGroups)
+                            }
+                        }
+                        if !model.snapshot.limitations.isEmpty {
+                            DisclosureGroup("Scan limitations", isExpanded: $limitationsExpanded) {
+                                ForEach(model.snapshot.limitations, id: \.self) { limitation in
+                                    Text(limitation)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.top, 4)
+                                }
+                            }
+                            .font(.callout)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        }
+                    }
+                    .animation(motion, value: filteredActivities.map(\.id))
+                }
+            }
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search port, process, or PID", text: $query)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+                .onAppear {
+                    DispatchQueue.main.async { searchFocused = true }
+                }
+                .accessibilityLabel("Search listening ports")
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(QuietButtonStyle())
+                .quietFocus()
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private func sectionHeader<Accessory: View>(_ title: String, @ViewBuilder accessory: () -> Accessory) -> some View {
+        HStack(spacing: 5) {
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            accessory()
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    /// Apps and system services: not closable, so hidden behind a disclosure unless the
+    /// user is searching (a search that only matches protected ports must still show them).
+    private var protectedHeader: some View {
+        let expanded = protectedExpanded || !query.isEmpty
+        return Button {
+            withAnimation(motion) { protectedExpanded.toggle() }
+        } label: {
+            sectionHeader("Not Closable") {
+                Text(String(protectedGroups.count))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .quietFocus()
+        .disabled(!query.isEmpty)
+        .accessibilityLabel("\(protectedGroups.count) not closable apps and system services")
+        .accessibilityHint(expanded ? "Collapses the list" : "Expands the list")
+    }
+
+    private func groupRows(_ groups: [ListenerGroup]) -> some View {
+        ForEach(groups) { group in
+            let closeTarget = group.closeTarget
+            let foldable = group.activities.count > 1
+            let expanded = foldable && expandedGroupIDs.contains(group.id)
+            let revealed = foldable ? min(revealedCounts[group.id] ?? 0, group.activities.count - 1) : 0
+            let listeners = group.activities.sorted { $0.listener.port < $1.listener.port }
+            PortRow(
+                port: group.ports[0],
+                // "+N" drops away as the rows come out, and returns once the last is tucked back.
+                extraPorts: expanded || revealed > 0 ? 0 : group.ports.count - 1,
+                icon: group.primary,
+                title: group.primary.inference.label,
+                subtitle: group.subtitle,
+                trailing: group.primary.process.compactUptime,
+                isLAN: (expanded ? listeners[0].scope : group.scope) == .lan,
+                disclosure: foldable ? expanded : nil,
+                onSelect: { foldable ? toggle(group) : showDetails(group.primary) },
+                onClose: closeTarget.map { target in { closeNow(target) } }
+            )
+            .contextMenu { contextMenu(for: group.activities) }
+            ForEach(Array(listeners.dropFirst().prefix(revealed).enumerated()), id: \.element.id) { index, activity in
+                listenerRow(activity)
+                    // Each row sits beneath the one above it, so it slides out from under it.
+                    .zIndex(-Double(index + 1))
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+            }
+        }
+    }
+
+    /// A revealed listener of an unfolded group, in the same style as any top-level row.
+    private func listenerRow(_ activity: Activity) -> some View {
+        let closeTarget = CloseService.protectionReason(for: activity) == nil ? activity : nil
+        return PortRow(
+            port: activity.listener.port,
+            icon: activity,
+            title: activity.inference.label,
+            subtitle: activity.inference.label == activity.process.command
+                ? "PID \(activity.process.pid)"
+                : "\(activity.process.command) · PID \(activity.process.pid)",
+            isLAN: activity.scope == .lan,
+            onSelect: { showDetails(activity) },
+            onClose: closeTarget.map { target in { closeNow(target) } }
+        )
+        .contextMenu { contextMenu(for: [activity]) }
+    }
+
     private var emptyView: some View {
         let scanUnavailable = model.notice?.kind == .error && model.snapshot.activities.isEmpty
-        return VStack(spacing: 8) {
-            Image(systemName: scanUnavailable ? "exclamationmark.triangle" :
-                model.snapshot.activities.isEmpty ? "checkmark.circle" : "magnifyingglass")
-                .font(.title2).foregroundStyle(.secondary)
-            Text(scanUnavailable ? "Unable to scan" :
-                model.snapshot.activities.isEmpty ? "No listening ports" : "No matching ports")
+        let nothingListening = model.visible.activities.isEmpty && query.isEmpty
+        return VStack(spacing: 6) {
+            Image(systemName: scanUnavailable ? "exclamationmark.triangle"
+                : nothingListening ? "door.left.hand.closed" : "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 4)
+            Text(scanUnavailable ? "Unable to scan" : nothingListening ? "Nothing left open" : "No matching ports")
                 .font(.headline)
-            Text(scanUnavailable ? "Check the message above, then try Refresh." :
-                model.snapshot.activities.isEmpty ? "No TCP listener was found on this Mac." : "Try another search.")
-                .font(.callout).foregroundStyle(.secondary)
-            if !model.snapshot.activities.isEmpty {
-                Button("Clear Search") {
-                    query = ""
-                }
-                .padding(.top, 4)
+            Text(scanUnavailable ? "Check the message above, then refresh."
+                : nothingListening ? "No TCP listeners on this Mac." : "Try a port number, process name, or PID.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if !query.isEmpty {
+                Button("Clear Search") { query = "" }
+                    .controlSize(.small)
+                    .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
     }
 
-    private func detailView(_ activity: Activity) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
+    // MARK: - Port Page
+
+    private func portPage(_ activity: Activity) -> some View {
+        let port = activity.listener.port
+        let protection = CloseService.protectionReason(for: activity)
+        let folder = activity.projectMarker?.root ?? activity.process.cwd
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
                     ProcessIconView(activity: activity, size: 36)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Port \(String(activity.listener.port))")
-                            .font(.system(size: 26, weight: .semibold, design: .monospaced))
-                        Text(activity.inference.label).font(.title3.weight(.medium))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Port \(String(port))")
+                            .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        Text(activity.inference.label)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
                     ScopeLabel(scope: activity.scope)
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Button {
-                        openBrowser(port: activity.listener.port)
+                        openBrowser(port)
                     } label: {
                         Label("Open", systemImage: "safari")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .keyboardShortcut("o", modifiers: .command)
-                    .help("Open http://localhost:\(String(activity.listener.port)) in default browser (⌘O)")
-
+                    .help("Open \(localURL(port)) (⌘O)")
                     Button {
-                        copyToClipboard("http://localhost:\(String(activity.listener.port))")
+                        copy(localURL(port))
                     } label: {
-                        Label("Copy Link", systemImage: "link")
+                        Label("Copy URL", systemImage: "link")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .keyboardShortcut("c", modifiers: .command)
-                    .help("Copy http://localhost:\(String(activity.listener.port)) to clipboard (⌘C)")
-
-                    if let path = activity.projectMarker?.root ?? activity.process.cwd {
+                    .help("Copy \(localURL(port))")
+                    if let folder {
                         Button {
-                            revealInFinder(path: path)
+                            reveal(folder)
                         } label: {
                             Label("Reveal", systemImage: "folder")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Reveal project folder in Finder")
+                        .help("Reveal \(compactPath(folder)) in Finder")
+                    }
+                    Spacer(minLength: 0)
+                    if protection == nil {
+                        Button {
+                            close(activity)
+                        } label: {
+                            Text("Close…").foregroundStyle(Color(nsColor: .systemRed))
+                        }
+                        .disabled(model.isPreparingClose || model.isClosing)
+                        .help("Review closing PID \(String(activity.process.pid))")
                     }
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
-                if let reason = CloseService.protectionReason(for: activity) {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "lock.shield.fill")
-                            .font(.system(size: 16))
+                if let protection {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "lock.fill")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Close Unavailable")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text(reason)
-                                .font(.system(size: 11))
+                            Text("Can't be closed from LeftOpen")
+                                .font(.callout.weight(.medium))
+                            Text(protection)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15), lineWidth: 0.5))
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
                 Divider()
-                infoRow("Command", activity.process.command)
-                infoRow("PID", String(activity.process.pid))
-                if let uptime = activity.process.uptime {
-                    infoRow("Uptime", uptime)
+                VStack(alignment: .leading, spacing: 8) {
+                    infoRow("Command", activity.process.command)
+                    infoRow("PID", String(activity.process.pid))
+                    if let uptime = activity.process.uptime {
+                        infoRow("Uptime", uptime)
+                    }
+                    if let memory = activity.process.memoryUsage {
+                        infoRow("Memory", memory)
+                    }
+                    infoRow("Executable", compactPath(activity.process.executablePath))
+                    infoRow("Folder", compactPath(activity.process.cwd))
+                    infoRow("Addresses", activity.listener.addresses.joined(separator: ", "))
                 }
-                if let mem = activity.process.memoryUsage {
-                    infoRow("Memory", mem)
-                }
-                infoRow("Executable", compactPath(activity.process.executablePath))
-                infoRow("Folder", compactPath(activity.process.cwd))
-                infoRow("Addresses", activity.listener.addresses.joined(separator: ", "))
 
                 Divider()
                 DisclosureGroup("Owner evidence", isExpanded: $evidenceExpanded) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
                         infoRow("Type", activity.inference.category.accessibleName.capitalized)
                         infoRow("User", activity.process.user ?? activity.process.uid.map(String.init) ?? "Unknown")
                         if let project = activity.projectMarker {
-                            infoRow("Project Marker", compactPath(project.markerPath))
+                            infoRow("Marker", compactPath(project.markerPath))
                         }
                         if let bundle = activity.applicationBundle {
                             infoRow("Application", compactPath(bundle.path))
                         }
                         if !activity.parentChain.isEmpty {
-                            infoRow("Parents", activity.parentChain.map { "\($0.command) (\($0.pid))" }.joined(separator: " → "))
+                            infoRow("Parents", activity.parentChain.map { "\($0.command) (\(String($0.pid)))" }.joined(separator: " → "))
                         }
                         infoRow("Confidence", activity.inference.confidence)
-                        Text(activity.inference.reason).font(.callout).foregroundStyle(.secondary)
+                        Text(activity.inference.reason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
-                    .padding(.top, 7)
+                    .padding(.top, 8)
                 }
-
-                if CloseService.protectionReason(for: activity) == nil {
-                    Button {
-                        Task { await model.previewClose(activity) }
-                    } label: {
-                        Text("Close Port \(String(activity.listener.port))…")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .frame(maxWidth: .infinity)
-                    .disabled(model.isPreparingClose || model.isClosing)
-                    .help("Review this one-PID SIGTERM action before confirming")
-                    if model.isPreparingClose {
-                        ProgressView("Checking process identity…")
-                            .controlSize(.small)
-                    }
-                }
+                .font(.callout)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 16)
+            .padding(14)
         }
     }
 
-    private func processDetailView(_ group: ListenerGroup) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    ProcessIconView(activity: group.primary, size: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.primary.inference.label)
-                            .font(.title3.weight(.semibold))
-                        HStack(spacing: 6) {
-                            if group.pids.count > 1 {
-                                Text("\(group.pids.count) processes · \(group.ports.count) listening ports")
-                            } else {
-                                Text("PID \(group.primary.process.pid) · \(group.ports.count) listening ports")
-                            }
-                            if let uptime = group.primary.process.uptime {
-                                Text("•")
-                                Text("Up \(uptime)")
-                            }
-                            if let mem = group.primary.process.memoryUsage {
-                                Text("•")
-                                Text(mem)
-                            }
-                        }
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                Text("Choose a port to inspect its listener details.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                ForEach(group.activities.sorted { $0.listener.port < $1.listener.port }) { activity in
-                    ProcessDetailPortRow(
-                        activity: activity,
-                        showCommand: group.pids.count > 1,
-                        onSelect: {
-                            evidenceExpanded = false
-                            model.selectedActivityID = activity.id
-                        },
-                        onClose: { act in
-                            Task { await model.previewClose(act) }
-                        },
-                        openBrowser: { port in
-                            openBrowser(port: port)
-                        },
-                        copyToClipboard: { str in
-                            copyToClipboard(str)
-                        }
-                    )
-                    if activity.id != group.activities.sorted(by: { $0.listener.port < $1.listener.port }).last?.id {
-                        Divider()
-                    }
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-        }
-    }
-
-    private var vanishedView: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "arrow.clockwise.circle").font(.title2).foregroundStyle(.secondary)
+    private var vanishedPage: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "door.left.hand.closed")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 4)
             Text("No longer listening").font(.headline)
-            Text("This listener disappeared during refresh. Go back to see the current ports.")
-                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button("Back to Ports") { model.selectedActivityID = nil }
-                .padding(.top, 4)
+            Text("It went away during the last refresh.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Back", action: goBack)
+                .controlSize(.small)
+                .padding(.top, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
     }
 
-    private func reviewView(_ plan: ClosePlan) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 13) {
-                Label("Close PID \(plan.pid)?", systemImage: "exclamationmark.triangle")
-                    .font(.title3).fontWeight(.semibold)
-                Text("This sends SIGTERM to one process listening on port \(String(plan.port)). It does not kill a process tree or force-quit anything.")
-                    .font(.callout)
+    // MARK: - Review Pages
 
-                Divider()
-                infoRow("Process", plan.activity.process.command)
-                infoRow("Executable", compactPath(plan.executablePath))
-                infoRow("Started", plan.startTime)
-
-                if !plan.otherPorts.isEmpty {
-                    Label("This PID also listens on \(plan.otherPorts.map(String.init).joined(separator: ", ")); those ports may close too.",
-                          systemImage: "exclamationmark.triangle")
+    private func reviewPage(_ plan: ClosePlan) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Close port \(String(plan.port))?")
+                        .font(.title3.weight(.semibold))
+                    Text("LeftOpen sends SIGTERM to PID \(String(plan.pid)) only. Nothing is force-quit, and child processes are not signalled.")
                         .font(.callout)
-                }
-                if !plan.peerPIDs.isEmpty {
-                    Label("Other PIDs share this port. Only PID \(plan.pid) will be signalled.",
-                          systemImage: "person.2")
-                        .font(.callout)
-                }
-
-                if model.isClosing {
-                    ProgressView("Sending SIGTERM and checking the port…")
-                        .padding(.top, 4)
-                }
-
-                HStack {
-                    Button("Cancel") { model.pendingPlan = nil }
-                        .keyboardShortcut(.cancelAction)
-                        .disabled(model.isClosing)
-                    Spacer()
-                    Button(role: .destructive) {
-                        Task { await model.confirmClose() }
-                    } label: {
-                        Text("Close PID \(plan.pid)")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    infoRow("Process", plan.activity.process.command)
+                    infoRow("Executable", compactPath(plan.executablePath))
+                    infoRow("Started", plan.startTime)
+                    if !plan.otherPorts.isEmpty {
+                        caution("It also listens on \(plan.otherPorts.map(String.init).joined(separator: ", ")); those ports will close too.")
                     }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.isClosing)
+                    if !plan.peerPIDs.isEmpty {
+                        caution("Other processes share this port. Only PID \(String(plan.pid)) is signalled.")
+                    }
                 }
-                .padding(.top, 6)
+                .padding(14)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 16)
+            confirmBar(plan.otherPorts.isEmpty ? "Close Port" : "Close Ports") {
+                Task { await model.confirmClose() }
+            }
         }
     }
 
-    private func batchReviewView(_ plans: [ClosePlan]) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 13) {
-                Label("Close \(plans.count) Project Server\(plans.count == 1 ? "" : "s")?", systemImage: "door.left.hand.closed")
-                    .font(.title3).fontWeight(.semibold)
-                Text("This sends SIGTERM to each of the \(plans.count) project processes below. Application bundles and system services will not be affected.")
-                    .font(.callout)
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
+    private func batchReviewPage(_ plans: [ClosePlan]) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Close \(plans.count) project server\(plans.count == 1 ? "" : "s")?")
+                            .font(.title3.weight(.semibold))
+                        Text("LeftOpen sends SIGTERM to each process below. Apps and system services are not touched.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
                     ForEach(plans) { plan in
-                        HStack(spacing: 8) {
-                            Text(String(plan.port))
-                                .font(.system(.body, design: .monospaced))
-                                .fontWeight(.semibold)
-                                .frame(width: 48, alignment: .leading)
-                            ProcessIconView(activity: plan.activity, size: 18)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(plan.activity.inference.label)
-                                    .font(.system(size: 13, weight: .medium))
-                                HStack(spacing: 4) {
-                                    Text("\(plan.activity.process.command) (PID \(plan.pid))")
-                                    if let mem = plan.activity.process.memoryUsage {
-                                        Text("•")
-                                        Text(mem)
-                                    }
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if let uptime = plan.activity.process.compactUptime {
-                                Text(uptime)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 3)
-                        if plan.id != plans.last?.id {
-                            Divider()
-                        }
+                        PortRow(
+                            port: plan.port,
+                            icon: plan.activity,
+                            title: plan.activity.inference.label,
+                            subtitle: "\(plan.activity.process.command) · PID \(String(plan.pid))",
+                            trailing: plan.activity.process.compactUptime
+                        )
                     }
                 }
-                .padding(8)
-                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-
-                if model.isClosing {
-                    ProgressView("Sending SIGTERM to project processes…")
-                        .padding(.top, 4)
-                }
-
-                HStack {
-                    Button("Cancel") { model.pendingBatchPlans = nil }
-                        .keyboardShortcut(.cancelAction)
-                        .disabled(model.isClosing)
-                    Spacer()
-                    Button(role: .destructive) {
-                        Task { await model.confirmBatchClose() }
-                    } label: {
-                        Text("Close All \(plans.count) Projects")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.isClosing)
-                }
-                .padding(.top, 6)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 16)
+            confirmBar("Close All") {
+                Task { await model.confirmBatchClose() }
+            }
         }
+    }
+
+    /// Shared by both review pages: Cancel is the header's back button (Esc), so the bar only
+    /// carries progress and the destructive default action.
+    private func confirmBar(_ title: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            if model.isClosing {
+                ProgressView().controlSize(.small)
+                Text("Closing…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Cancel", action: goBack)
+                .disabled(model.isClosing)
+            Button(title, role: .destructive, action: action)
+                .buttonStyle(.borderedProminent)
+                .tint(Color(nsColor: .systemRed))
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.isClosing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private func caution(_ text: String) -> some View {
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color(nsColor: .systemOrange))
+        }
+        .font(.callout)
     }
 
     private func infoRow(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(title)
-                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 88, alignment: .leading)
+                .frame(width: 80, alignment: .leading)
             Text(value)
-                .font(.system(size: 12))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .font(.system(size: 12))
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder
-    private func contextMenu(for group: ListenerGroup) -> some View {
-        if group.ports.count == 1, let port = group.ports.first {
-            Button {
-                openBrowser(port: port)
-            } label: {
-                Label("Open in Browser (http://localhost:\(String(port)))", systemImage: "globe")
-            }
-            Button {
-                copyToClipboard("http://localhost:\(String(port))")
-            } label: {
-                Label("Copy URL", systemImage: "doc.on.doc")
-            }
-            Button {
-                copyToClipboard(String(port))
-            } label: {
-                Label("Copy Port", systemImage: "number")
-            }
-        } else {
-            ForEach(group.ports, id: \.self) { port in
-                Button {
-                    openBrowser(port: port)
-                } label: {
-                    Label("Open Port \(String(port)) (http://localhost:\(String(port)))", systemImage: "globe")
-                }
-            }
-            Divider()
-            Button {
-                copyToClipboard(group.ports.map(String.init).joined(separator: ", "))
-            } label: {
-                Label("Copy Ports", systemImage: "number")
-            }
-        }
-        Button {
-            copyToClipboard(String(group.primary.process.pid))
-        } label: {
-            Label("Copy PID (\(group.primary.process.pid))", systemImage: "doc.on.clipboard")
-        }
-        if let path = group.primary.projectMarker?.root ?? group.primary.process.cwd {
-            Divider()
-            Button {
-                revealInFinder(path: path)
-            } label: {
-                Label("Reveal in Finder", systemImage: "folder")
-            }
-        }
+    // MARK: - Actions
 
-        let closableActivities = group.activities.filter { CloseService.protectionReason(for: $0) == nil }
-        if !closableActivities.isEmpty {
+    @ViewBuilder
+    private func contextMenu(for activities: [Activity]) -> some View {
+        let ports = Array(Set(activities.map(\.listener.port))).sorted()
+        let primary = activities[0]
+        if ports.count == 1 {
+            Button("Open in Browser") { openBrowser(ports[0]) }
+            Button("Copy URL") { copy(localURL(ports[0])) }
+        } else {
+            Menu("Open in Browser") {
+                ForEach(ports, id: \.self) { port in
+                    Button("localhost:\(String(port))") { openBrowser(port) }
+                }
+            }
+        }
+        Button(ports.count == 1 ? "Copy Port" : "Copy Ports") {
+            copy(ports.map(String.init).joined(separator: ", "))
+        }
+        Button("Copy PID") { copy(String(primary.process.pid)) }
+        if let folder = primary.projectMarker?.root ?? primary.process.cwd {
             Divider()
-            if group.ports.count == 1 {
-                Button(role: .destructive) {
-                    Task { await model.previewClose(group.primary) }
-                } label: {
-                    Label("Close Port \(group.ports[0]) (PID \(group.primary.process.pid))…", systemImage: "xmark.circle")
-                }
-            } else {
-                ForEach(closableActivities) { act in
-                    Button(role: .destructive) {
-                        Task { await model.previewClose(act) }
-                    } label: {
-                        Label("Close Port \(act.listener.port) (PID \(act.process.pid))…", systemImage: "xmark.circle")
-                    }
-                }
+            Button("Reveal in Finder") { reveal(folder) }
+        }
+        let closable = activities
+            .filter { CloseService.protectionReason(for: $0) == nil }
+            .sorted { $0.listener.port < $1.listener.port }
+        if !closable.isEmpty {
+            Divider()
+            ForEach(closable) { activity in
+                Button("Close Port \(String(activity.listener.port))…") { close(activity) }
             }
         }
     }
 
-    private func openBrowser(port: Int) {
-        if let url = URL(string: "http://localhost:\(String(port))") {
+    private func localURL(_ port: Int) -> String { "http://localhost:\(port)" }
+
+    private func openBrowser(_ port: Int) {
+        if let url = URL(string: localURL(port)) {
             NSWorkspace.shared.open(url)
         }
     }
 
-    private func copyToClipboard(_ string: String) {
+    private func copy(_ string: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
     }
 
-    private func revealInFinder(path: String) {
+    private func reveal(_ path: String) {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
     }
-
-    private var footer: some View {
-        HStack(spacing: 8) {
-            Text(model.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not yet scanned")
-                .font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            LaunchAtLoginToggle()
-            Text("•")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .focusEffectDisabled()
-                .font(.caption)
-                .help("Quit LeftOpen")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-    }
 }
 
-private struct LaunchAtLoginToggle: View {
-    @ObservedObject private var manager = LaunchAtLoginManager.shared
+// MARK: - Components
 
-    var body: some View {
-        Button {
-            manager.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: manager.isEnabled ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(manager.isEnabled ? Color(nsColor: .systemGreen) : Color.secondary)
-                Text("Start at Login")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-        .focusable(false)
-        .focusEffectDisabled()
-        .help(manager.isEnabled ? "LeftOpen starts automatically when you log in" : "Click to launch LeftOpen at login")
-    }
+/// The panel's surface colour, shared by the pages and the opaque row cards that sit on it.
+private func panelSurface(_ colorScheme: ColorScheme) -> Color {
+    colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor)
 }
 
-private struct RowButtonStyle: ButtonStyle {
-    var horizontalInset: CGFloat = 6
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : (isHovered ? 0.05 : 0)))
-                    .padding(.horizontal, horizontalInset)
-            )
-            .contentShape(Rectangle())
-            .onHover { isHovered = $0 }
-    }
-}
 
 private struct ListenerGroup: Identifiable {
     let id: String
     let activities: [Activity]
 
-    init(id: String, activities: [Activity]) {
-        self.id = id
-        self.activities = activities
-    }
-
     var primary: Activity { activities[0] }
     var ports: [Int] { Array(Set(activities.map(\.listener.port))).sorted() }
     var pids: [Int32] { Array(Set(activities.map(\.process.pid))).sorted() }
     var scope: ListenerScope { activities.contains { $0.scope == .lan } ? .lan : .local }
-}
 
-private struct GroupRowItem<MenuContent: View>: View {
-    let group: ListenerGroup
-    let onSelect: () -> Void
-    let onClose: (Activity) -> Void
-    @ViewBuilder let contextMenuContent: () -> MenuContent
-
-    @State private var isRowHovered = false
-    @State private var isCloseBtnHovered = false
-
-    private var isClosable: Bool {
-        group.ports.count == 1 && CloseService.protectionReason(for: group.primary) == nil
+    /// What a swipe or ✕ closes: only offered when one closable PID owns every port in the row.
+    var closeTarget: Activity? {
+        pids.count == 1 && CloseService.protectionReason(for: primary) == nil ? primary : nil
     }
 
-    var body: some View {
-        HStack(spacing: 0) {
-            Button {
-                onSelect()
-            } label: {
-                HStack(spacing: 10) {
-                    HStack(spacing: 4) {
-                        Text(String(group.ports[0]))
-                            .font(.system(.callout, design: .monospaced))
-                            .fontWeight(.semibold)
-                        if group.ports.count > 1 {
-                            Text("+\(group.ports.count - 1)")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1.5)
-                                .background(Color.secondary.opacity(0.15), in: Capsule())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(width: 80, alignment: .leading)
-
-                    ProcessIconView(activity: group.primary, size: 22)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.primary.inference.label)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                        if group.pids.count > 1 {
-                            Text("\(group.pids.count) processes · \(group.ports.count) ports")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        } else {
-                            Text(group.primary.inference.label == group.primary.process.command
-                                ? "PID \(group.primary.process.pid)"
-                                : "\(group.primary.process.command) · PID \(group.primary.process.pid)")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: 4)
-
-                    if group.ports.count > 1 {
-                        Text("\(group.ports.count) ports")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if let uptime = group.primary.process.compactUptime {
-                        Text(uptime)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if group.scope == .lan {
-                        Text("LAN")
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
-                            .foregroundStyle(Color.orange)
-                            .help("LAN-facing bind address; actual reachability was not checked")
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .focusEffectDisabled()
-
-            HStack(spacing: 8) {
-                if isClosable && isRowHovered {
-                    Button {
-                        onClose(group.primary)
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(isCloseBtnHovered ? Color.white : Color.secondary)
-                            .frame(width: 18, height: 18)
-                            .background(
-                                Circle()
-                                    .fill(isCloseBtnHovered ? Color(nsColor: .systemRed) : Color.secondary.opacity(0.18))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .focusEffectDisabled()
-                    .help("Close port \(group.ports[0]) (SIGTERM PID \(group.primary.process.pid))")
-                    .onHover { isCloseBtnHovered = $0 }
-                }
-
-                Button {
-                    onSelect()
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary.opacity(0.6))
-                        .frame(width: 12, height: 18)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .focusEffectDisabled()
-            }
-            .padding(.leading, 6)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(isRowHovered ? 0.05 : 0))
-                .padding(.horizontal, 6)
-        )
-        .contentShape(Rectangle())
-        .onHover { isRowHovered = $0 }
-        .contextMenu {
-            contextMenuContent()
-        }
-        .accessibilityLabel("Ports \(group.ports.map(String.init).joined(separator: ", ")), \(group.primary.inference.label), \(group.primary.inference.category.accessibleName), \(group.scope == .lan ? "LAN-facing" : "local only"), PID \(group.primary.process.pid)")
-        .accessibilityHint("Opens listener details")
+    var subtitle: String {
+        if pids.count > 1 { return "\(pids.count) processes" }
+        let pid = "PID \(primary.process.pid)"
+        return primary.inference.label == primary.process.command ? pid : "\(primary.process.command) · \(pid)"
     }
 }
 
-private struct ProcessDetailPortRow: View {
-    let activity: Activity
-    let showCommand: Bool
-    let onSelect: () -> Void
-    let onClose: (Activity) -> Void
-    let openBrowser: (Int) -> Void
-    let copyToClipboard: (String) -> Void
+/// One row style for every port list in the panel.
+///
+/// Interactive rows (with `onSelect`) are a card lying on an action layer: Close (red) under the
+/// leading edge, when closable, and Details (blue) under the trailing edge. Drag right to close,
+/// left for details. Dragging, by mouse
+/// or two-finger trackpad swipe, slides the card across the layer, and letting go past the
+/// threshold runs the uncovered action. Swiping to close is the confirmation: no review page.
+private struct PortRow: View {
+    let port: Int
+    var extraPorts = 0
+    var icon: Activity?
+    let title: String
+    var subtitle: String?
+    var trailing: String?
+    var isLAN = false
+    /// Some(expanded) for a row that folds; the chevron is only ever a fold control.
+    var disclosure: Bool?
+    var onSelect: (() -> Void)?
+    var onClose: (() -> Void)?
 
-    @State private var isRowHovered = false
-    @State private var isCloseBtnHovered = false
+    @StateObject private var swipe = SwipeTracker()
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
 
-    private var isClosable: Bool {
-        CloseService.protectionReason(for: activity) == nil
-    }
+    // How much of each action is uncovered: the gap between the layer's edge and the card.
+    private var leadingReveal: CGFloat { max(0, swipe.offset) }
+    private var trailingReveal: CGFloat { max(0, -swipe.offset) }
+    private var isLifted: Bool { swipe.offset != 0 }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Button {
-                onSelect()
-            } label: {
-                HStack(spacing: 10) {
-                    Text(String(activity.listener.port))
-                        .font(.system(.body, design: .monospaced))
-                        .fontWeight(.semibold)
-                        .frame(width: 54, alignment: .leading)
-                    ProcessIconView(activity: activity, size: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        if showCommand {
-                            Text(activity.process.command + " (PID \(activity.process.pid))")
-                                .font(.callout)
-                                .fontWeight(.medium)
-                                .lineLimit(1)
-                            HStack(spacing: 4) {
-                                Text(activity.listener.addresses.joined(separator: ", "))
-                                Text("•")
-                                Text(activity.scope == .lan ? "LAN-facing" : "Local only")
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        } else {
-                            Text(activity.listener.addresses.joined(separator: ", "))
-                                .font(.callout)
-                                .lineLimit(1)
-                            Text(activity.scope == .lan ? "LAN-facing" : "Local only")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer(minLength: 0)
+        card
+            .offset(x: swipe.offset)
+            .background { actionLayer }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect?() }
+            .gesture(dragGesture, including: onSelect == nil ? .none : .all)
+            .onHover { hovering in
+                guard onSelect != nil else { return }
+                withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
+                configureSwipe()
+                swipe.setListening(hovering && isEnabled)
+            }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { swipe.setListening(false) }
+            }
+            .onDisappear { swipe.setListening(false) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(onSelect == nil ? [] : .isButton)
+            .accessibilityAction { onSelect?() }
+            .accessibilityActions {
+                if let onClose {
+                    Button("Close Port \(String(port))", action: onClose)
                 }
+            }
+    }
+
+    private var card: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Text(String(port))
+                    .font(.system(.callout, design: .monospaced).weight(.semibold))
+                if extraPorts > 0 {
+                    Text("+\(extraPorts)")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(Color.secondary.opacity(0.15), in: Capsule())
+                        .transition(.offset(y: 10).combined(with: .opacity))
+                }
+            }
+            .frame(width: 76, alignment: .leading)
+
+            if let icon {
+                ProcessIconView(activity: icon, size: 22)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if let trailing {
+                Text(trailing)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            if isLAN {
+                LANBadge()
+            }
+            if let disclosure {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(disclosure ? 90 : 0))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background {
+            // Opaque, so the action layer is only seen where the card has moved off it.
+            let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+            shape
+                .fill(panelSurface(colorScheme))
+                .overlay(shape.fill(Color.primary.opacity(isHovered || isLifted ? 0.06 : 0)))
+                .shadow(color: .black.opacity(isLifted ? 0.14 : 0), radius: 1.5, y: 0.5)
+        }
+    }
+
+    /// Details under the leading half, Close (or a lock, when it can't be closed) under the
+    /// trailing half. Each label is centred in whatever part of its side is uncovered.
+    @ViewBuilder
+    private var actionLayer: some View {
+        if onSelect != nil && swipe.offset != 0 {
+            HStack(spacing: 0) {
+                side(onClose == nil ? .locked : .close, reveal: leadingReveal, alignment: .leading)
+                side(.details, reveal: trailingReveal, alignment: .trailing)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .animation(.snappy(duration: 0.18), value: swipe.isArmed)
+        }
+    }
+
+    private enum Action { case details, close, locked }
+
+    private func side(_ action: Action, reveal: CGFloat, alignment: Alignment) -> some View {
+        let tint = switch action {
+        case .details: Color(nsColor: .systemBlue)
+        case .close: Color(nsColor: .systemRed)
+        case .locked: Color.secondary
+        }
+        let armed = swipe.isArmed && (action == .details) == (swipe.offset < 0)
+        return ZStack(alignment: alignment) {
+            Rectangle().fill(armed ? tint : tint.opacity(0.16))
+            HStack(spacing: 5) {
+                Image(systemName: action == .details ? "info.circle.fill" : action == .close ? "xmark.circle.fill" : "lock.fill")
+                    .font(.system(size: reveal < 30 ? 10 : 13, weight: .semibold))
+                    .scaleEffect(armed ? 1.15 : 1)
+                if reveal > 78 {
+                    Text(action == .details ? "Details" : "Close")
+                        .font(.system(size: 11, weight: .semibold))
+                        .transition(.opacity)
+                }
+            }
+            .foregroundStyle(armed ? Color.white : tint)
+            .frame(width: reveal)
+            .opacity(reveal > 6 ? 1 : 0)
+            .animation(.easeOut(duration: 0.12), value: reveal > 78)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                configureSwipe()
+                swipe.drag(value.translation)
+            }
+            .onEnded { value in
+                swipe.endDrag(predicted: value.predictedEndTranslation.width)
+            }
+    }
+
+    private func configureSwipe() {
+        swipe.allowsLeading = onClose != nil
+        swipe.onCommit = { edge in
+            if edge == .leading { onClose?() } else { onSelect?() }
+        }
+    }
+}
+
+/// Tracks a row's horizontal pull from either a mouse drag or a trackpad two-finger swipe
+/// (scroll events, watched only while the pointer is over the row). Vertical movement is left
+/// alone so the list still scrolls.
+@MainActor
+private final class SwipeTracker: ObservableObject {
+    @Published private(set) var offset: CGFloat = 0
+    @Published private(set) var isArmed = false
+
+    /// Whether the leading action (revealed by dragging right) exists; trailing always does.
+    var allowsLeading = true
+    var onCommit: (HorizontalEdge) -> Void = { _ in }
+
+    private let threshold: CGFloat = 84
+    private let softLimit: CGFloat = 150
+    private var raw: CGFloat = 0
+    private var axis: Axis = .undecided
+    private var swallowMomentum = false
+    nonisolated(unsafe) private var monitor: Any?
+
+    private enum Axis { case undecided, horizontal, vertical }
+
+    deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    // MARK: Mouse drag
+
+    func drag(_ translation: CGSize) {
+        if axis == .undecided {
+            axis = abs(translation.width) > abs(translation.height) ? .horizontal : .vertical
+            if axis == .horizontal { NSCursor.closedHand.push() }
+        }
+        guard axis == .horizontal else { return }
+        raw = translation.width
+        update()
+    }
+
+    func endDrag(predicted: CGFloat) {
+        let wasHorizontal = axis == .horizontal
+        axis = .undecided
+        guard wasHorizontal else { return }
+        NSCursor.pop()
+        // A quick flick past twice the threshold counts, even if released short of it.
+        let flicked = abs(predicted) > threshold * 2 && isAllowed(predicted) && (predicted > 0) == (raw > 0)
+        finish(commit: isArmed || flicked)
+    }
+
+    // MARK: Trackpad swipe
+
+    func setListening(_ listening: Bool) {
+        if listening, monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self else { return event }
+                let consumed = MainActor.assumeIsolated { self.handleScroll(event) }
+                return consumed ? nil : event
+            }
+        } else if !listening, let monitor, axis != .horizontal {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    /// Returns true when the event belongs to a horizontal row swipe and must not scroll the list.
+    private func handleScroll(_ event: NSEvent) -> Bool {
+        guard event.hasPreciseScrollingDeltas else { return false }
+        if event.momentumPhase != [] { return swallowMomentum }
+        switch event.phase {
+        case .began:
+            axis = .undecided
+            raw = 0
+            swallowMomentum = false
+            return false
+        case .changed:
+            if axis == .undecided {
+                let dx = abs(event.scrollingDeltaX), dy = abs(event.scrollingDeltaY)
+                guard dx + dy > 0.5 else { return false }
+                axis = dx > dy ? .horizontal : .vertical
+            }
+            guard axis == .horizontal else { return false }
+            // Follow the fingers whichever scroll direction the user prefers.
+            raw += event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+            update()
+            return true
+        case .ended, .cancelled:
+            guard axis == .horizontal else { axis = .undecided; return false }
+            axis = .undecided
+            swallowMomentum = true
+            finish(commit: isArmed)
+            return true
+        default:
+            return axis == .horizontal
+        }
+    }
+
+    // MARK: Shared
+
+    private func isAllowed(_ direction: CGFloat) -> Bool {
+        direction < 0 || allowsLeading
+    }
+
+    private func update() {
+        let sign: CGFloat = raw < 0 ? -1 : 1
+        let distance = abs(raw)
+        if !isAllowed(raw) {
+            // Nothing to reveal: a stiff pull that tops out, so it reads as "locked".
+            offset = sign * min(distance * 0.25, 28)
+        } else if distance > softLimit {
+            offset = sign * (softLimit + (distance - softLimit) * 0.3)
+        } else {
+            offset = raw
+        }
+        let armed = isAllowed(raw) && abs(offset) >= threshold
+        if armed != isArmed {
+            isArmed = armed
+            if armed {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
+        }
+    }
+
+    private func finish(commit: Bool) {
+        let edge: HorizontalEdge = raw > 0 ? .leading : .trailing
+        raw = 0
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            offset = 0
+            isArmed = false
+        }
+        if commit { onCommit(edge) }
+    }
+}
+
+private struct LANBadge: View {
+    var body: some View {
+        Text("LAN")
+            .font(.system(size: 9.5, weight: .bold))
+            .foregroundStyle(Color(nsColor: .systemOrange))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color(nsColor: .systemOrange).opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .help("LAN-facing bind address; actual reachability was not checked")
+    }
+}
+
+/// Secondary until hovered, primary on hover: the one style for the panel's chrome buttons.
+private struct QuietButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        QuietButton(configuration: configuration)
+    }
+
+    private struct QuietButton: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(isHovered && isEnabled ? .primary : .secondary)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
                 .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .focusEffectDisabled()
-
-            HStack(spacing: 8) {
-                if isClosable && isRowHovered {
-                    Button {
-                        onClose(activity)
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(isCloseBtnHovered ? Color.white : Color.secondary)
-                            .frame(width: 18, height: 18)
-                            .background(
-                                Circle()
-                                    .fill(isCloseBtnHovered ? Color(nsColor: .systemRed) : Color.secondary.opacity(0.18))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .focusEffectDisabled()
-                    .help("Close port \(activity.listener.port) (SIGTERM PID \(activity.process.pid))")
-                    .onHover { isCloseBtnHovered = $0 }
-                }
-
-                Button {
-                    onSelect()
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 12, height: 18)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .focusEffectDisabled()
-            }
-            .padding(.leading, 6)
+                .onHover { isHovered = $0 }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(isRowHovered ? 0.05 : 0))
-        )
-        .contentShape(Rectangle())
-        .onHover { isRowHovered = $0 }
-        .contextMenu {
-            Button {
-                openBrowser(activity.listener.port)
-            } label: {
-                Label("Open in Browser (http://localhost:\(String(activity.listener.port)))", systemImage: "globe")
-            }
-            Button {
-                copyToClipboard("http://localhost:\(String(activity.listener.port))")
-            } label: {
-                Label("Copy URL", systemImage: "doc.on.doc")
-            }
-            Button {
-                copyToClipboard(String(activity.listener.port))
-            } label: {
-                Label("Copy Port", systemImage: "number")
-            }
-            if isClosable {
-                Divider()
-                Button(role: .destructive) {
-                    onClose(activity)
-                } label: {
-                    Label("Close Port \(activity.listener.port) (PID \(activity.process.pid))…", systemImage: "xmark.circle")
-                }
-            }
-        }
-        .accessibilityLabel("Port \(String(activity.listener.port)), \(activity.scope == .lan ? "LAN-facing" : "local only")")
-        .accessibilityHint("Opens port details")
+    }
+}
+
+private extension View {
+    func quietFocus() -> some View {
+        focusable(false).focusEffectDisabled()
     }
 }
 
@@ -1170,8 +1226,11 @@ private struct ScopeLabel: View {
     }
 }
 
-private struct DoorMark: View {
+struct DoorMark: View {
     var isOpen: Bool = true
+    /// One-colour cut-out for template images (the menu bar): the leaf is punched through
+    /// instead of painted, so macOS can tint the mark for light and dark menu bars.
+    var isTemplate = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -1181,7 +1240,7 @@ private struct DoorMark: View {
             let sx = w / 33.0
             let sy = h / 55.0
 
-            let darkColor = colorScheme == .dark ? Color.white : Color(red: 0x21 / 255.0, green: 0x18 / 255.0, blue: 0x11 / 255.0)
+            let darkColor = isTemplate ? Color.black : colorScheme == .dark ? Color.white : Color(red: 0x21 / 255.0, green: 0x18 / 255.0, blue: 0x11 / 255.0)
             let leafColor = colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color.white
 
             ZStack {
@@ -1222,7 +1281,8 @@ private struct DoorMark: View {
                         p.addLine(to: CGPoint(x: 31.647 * sx, y: 53.609 * sy))
                         p.closeSubpath()
                     }
-                    .fill(leafColor)
+                    .fill(isTemplate ? Color.black : leafColor)
+                    .blendMode(isTemplate ? .destinationOut : .normal)
 
                     // Layer 3: door-knob
                     Path { p in
@@ -1252,7 +1312,8 @@ private struct DoorMark: View {
                         )
                         p.closeSubpath()
                     }
-                    .fill(leafColor)
+                    .fill(isTemplate ? Color.black : leafColor)
+                    .blendMode(isTemplate ? .destinationOut : .normal)
 
                     // Door knob on closed door (right side)
                     Path { p in
@@ -1299,8 +1360,48 @@ private struct DoorMark: View {
                     p.closeSubpath()
                 }
                 .fill(darkColor, style: FillStyle(eoFill: true))
+
+                // At menu bar size the hairline frame vanishes; thicken it to SF Symbol weight,
+                // keeping the outer edge where the full-size frame's is.
+                if isTemplate {
+                    let inset = 2.0
+                    Path { p in
+                        p.move(to: CGPoint(x: inset * sx, y: (54.805 - inset + 0.39) * sy))
+                        p.addLine(to: CGPoint(x: inset * sx, y: 16.155 * sy))
+                        p.addCurve(
+                            to: CGPoint(x: 16.383 * sx, y: (0.248 + inset - 0.39) * sy),
+                            control1: CGPoint(x: inset * sx, y: 8.3 * sy),
+                            control2: CGPoint(x: 8.5 * sx, y: (0.248 + inset - 0.39) * sy)
+                        )
+                        p.addCurve(
+                            to: CGPoint(x: (32.766 - inset) * sx, y: 16.155 * sy),
+                            control1: CGPoint(x: 24.3 * sx, y: (0.248 + inset - 0.39) * sy),
+                            control2: CGPoint(x: (32.766 - inset) * sx, y: 8.3 * sy)
+                        )
+                        p.addLine(to: CGPoint(x: (32.766 - inset) * sx, y: (54.805 - inset + 0.39) * sy))
+                        p.closeSubpath()
+                    }
+                    .stroke(darkColor, lineWidth: 3.2 * sx)
+                }
             }
+            .compositingGroup()
         }
         .aspectRatio(33.0 / 55.0, contentMode: .fit)
+    }
+}
+
+/// The door rendered once per state as a template image, sized like an SF Symbol in the menu bar.
+@MainActor
+enum MenuBarDoor {
+    static let open = render(isOpen: true)
+    static let closed = render(isOpen: false)
+
+    private static func render(isOpen: Bool) -> NSImage {
+        let renderer = ImageRenderer(content: DoorMark(isOpen: isOpen, isTemplate: true).frame(width: 10, height: 16.7))
+        renderer.scale = 2
+        let image = renderer.nsImage ?? NSImage()
+        image.isTemplate = true
+        image.accessibilityDescription = isOpen ? "Doors open" : "All doors closed"
+        return image
     }
 }
