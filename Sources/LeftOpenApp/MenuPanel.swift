@@ -12,7 +12,6 @@ struct MenuPanel: View {
     /// How many of each unfolded group's extra rows are currently shown; stepped one at a time.
     @State private var revealedCounts: [String: Int] = [:]
     @State private var foldTasks: [String: Task<Void, Never>] = [:]
-    @State private var selectedGroupID: String?
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
     @State private var protectedExpanded: Bool
@@ -27,11 +26,6 @@ struct MenuPanel: View {
 
     private var selectedActivity: Activity? {
         model.snapshot.activities.first { $0.id == model.selectedActivityID }
-    }
-
-    private var selectedGroup: ListenerGroup? {
-        guard let selectedGroupID else { return nil }
-        return listenerGroups(from: model.snapshot.activities).first { $0.id == selectedGroupID }
     }
 
     private var filteredActivities: [Activity] {
@@ -71,12 +65,7 @@ struct MenuPanel: View {
         var groups: [String: [Activity]] = [:]
         var orderedIDs: [String] = []
         for activity in activities {
-            let id: String
-            if let bundle = activity.applicationBundle {
-                id = "app:\(bundle.path)"
-            } else {
-                id = "pid:\(activity.process.pid):\(activity.process.executablePath ?? activity.process.command)"
-            }
+            let id = "pid:\(activity.process.pid):\(activity.process.executablePath ?? activity.process.command)"
             if groups[id] == nil { orderedIDs.append(id) }
             groups[id, default: []].append(activity)
         }
@@ -91,11 +80,10 @@ struct MenuPanel: View {
     // deeper (port → close review) slides in from the trailing edge. Lower pages stay
     // alive underneath, so going back keeps the list's scroll position and search.
 
-    private enum Page: Hashable { case list, process, port, review }
+    private enum Page: Hashable { case list, port, review }
 
     private var path: [Page] {
         var pages: [Page] = [.list]
-        if selectedGroup != nil { pages.append(.process) }
         if model.selectedActivityID != nil { pages.append(.port) }
         if model.pendingPlan != nil || model.pendingBatchPlans != nil { pages.append(.review) }
         return pages
@@ -114,18 +102,16 @@ struct MenuPanel: View {
             model.pendingBatchPlans = nil
         } else if model.pendingPlan != nil {
             model.pendingPlan = nil
-        } else if model.selectedActivityID != nil {
-            model.selectedActivityID = nil
         } else {
-            selectedGroupID = nil
+            model.selectedActivityID = nil
         }
     }
 
-    /// Multi-listener rows fold open in place rather than opening a page of their own. The
-    /// extra rows come out one after another from under the row above, and fold back in reverse.
+    /// Multi-listener process headers fold open in place. Their port rows appear beneath the
+    /// header one at a time, then fold back in reverse.
     private func toggle(_ group: ListenerGroup) {
         let id = group.id
-        let total = group.activities.count - 1
+        let total = group.activities.count
         let expanding = !expandedGroupIDs.contains(id)
         withAnimation(rowMotion) {
             if expanding { expandedGroupIDs.insert(id) } else { expandedGroupIDs.remove(id) }
@@ -153,11 +139,6 @@ struct MenuPanel: View {
     private func showDetails(_ activity: Activity) {
         evidenceExpanded = false
         model.selectedActivityID = activity.id
-    }
-
-    private func showProcessDetails(_ group: ListenerGroup) {
-        evidenceExpanded = false
-        selectedGroupID = group.id
     }
 
     private func close(_ activity: Activity) {
@@ -212,8 +193,6 @@ struct MenuPanel: View {
         switch page {
         case .list:
             listPage
-        case .process:
-            if let group = selectedGroup { processPage(group) } else { vanishedPage }
         case .port:
             if let activity = selectedActivity { portPage(activity) } else { vanishedPage }
         case .review:
@@ -461,41 +440,58 @@ struct MenuPanel: View {
             let closeTarget = group.closeTarget
             let foldable = group.activities.count > 1
             let expanded = foldable && expandedGroupIDs.contains(group.id)
-            let revealed = foldable ? min(revealedCounts[group.id] ?? 0, group.activities.count - 1) : 0
+            let revealed = foldable ? min(revealedCounts[group.id] ?? 0, group.activities.count) : 0
             let listeners = group.activities.sorted { $0.listener.port < $1.listener.port }
-            PortRow(
-                port: group.ports[0],
-                portLabel: foldable ? "\(group.ports.count) ports" : nil,
-                icon: group.primary,
-                title: group.primary.inference.label,
-                subtitle: group.groupSubtitle,
-                trailing: group.primary.process.compactUptime,
-                isLAN: (expanded ? listeners[0].scope : group.scope) == .lan,
-                disclosure: foldable ? expanded : nil,
-                onSelect: { foldable ? showProcessDetails(group) : showDetails(group.primary) },
-                onToggleDisclosure: foldable ? { toggle(group) } : nil,
-                onClose: closeTarget.map { target in { closeNow(target) } }
-            )
-            .contextMenu { contextMenu(for: group.activities) }
-            ForEach(Array(listeners.dropFirst().prefix(revealed).enumerated()), id: \.element.id) { index, activity in
-                listenerRow(activity)
-                    // Each row sits beneath the one above it, so it slides out from under it.
+            if foldable {
+                PortRow(
+                    port: expanded ? nil : group.ports[0],
+                    extraPorts: expanded ? 0 : group.ports.count - 1,
+                    icon: group.primary,
+                    title: group.primary.inference.label,
+                    subtitle: group.subtitle,
+                    isLAN: group.scope == .lan,
+                    allowsSwipe: false,
+                    alignIdentityWithPorts: expanded,
+                    disclosure: expanded,
+                    onSelect: { toggle(group) },
+                    onClose: nil
+                )
+                .contextMenu { contextMenu(for: group.activities) }
+
+                ForEach(Array(listeners.prefix(revealed).enumerated()), id: \.element.id) { index, activity in
+                    VStack(spacing: 0) {
+                        listenerRow(activity)
+                        if index < listeners.count - 1 {
+                            Divider().padding(.leading, 14)
+                        }
+                    }
                     .zIndex(-Double(index + 1))
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                }
+            } else if let activity = listeners.first {
+                PortRow(
+                    port: activity.listener.port,
+                    icon: activity,
+                    title: activity.inference.label,
+                    subtitle: group.subtitle,
+                    trailing: activity.process.compactUptime,
+                    isLAN: activity.scope == .lan,
+                    onSelect: { showDetails(activity) },
+                    onClose: closeTarget.map { target in { closeNow(target) } }
+                )
+                .contextMenu { contextMenu(for: group.activities) }
             }
         }
     }
 
-    /// A revealed listener of an unfolded group, in the same style as any top-level row.
+    /// A port row under its process header; process identity is inherited from the parent.
     private func listenerRow(_ activity: Activity) -> some View {
         let closeTarget = CloseService.protectionReason(for: activity) == nil ? activity : nil
         return PortRow(
             port: activity.listener.port,
-            icon: activity,
-            title: activity.inference.label,
-            subtitle: activity.inference.label == activity.process.command
-                ? "PID \(activity.process.pid)"
-                : "\(activity.process.command) · PID \(activity.process.pid)",
+            icon: nil,
+            title: activity.listener.addresses.joined(separator: ", "),
+            subtitle: activity.scope == .lan ? "LAN-facing" : "Local only",
             isLAN: activity.scope == .lan,
             onSelect: { showDetails(activity) },
             onClose: closeTarget.map { target in { closeNow(target) } }
@@ -527,41 +523,6 @@ struct MenuPanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
-    }
-
-    // MARK: - Process Page
-
-    /// A folded row represents a process (or app) group, not its first port. This page makes
-    /// the ownership hierarchy explicit before someone chooses one listener to inspect.
-    private func processPage(_ group: ListenerGroup) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    ProcessIconView(activity: group.primary, size: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.primary.inference.label)
-                            .font(.title3.weight(.semibold))
-                        Text(group.groupSubtitle)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Text("Choose a listening port to inspect its details.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-                Text("Listening Ports")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                ForEach(group.activities.sorted { $0.listener.port < $1.listener.port }) { activity in
-                    listenerRow(activity)
-                }
-            }
-            .padding(14)
-        }
     }
 
     // MARK: - Port Page
@@ -885,9 +846,10 @@ private struct ListenerGroup: Identifiable {
         pids.count == 1 && CloseService.protectionReason(for: primary) == nil ? primary : nil
     }
 
-    var groupSubtitle: String {
-        let processText = pids.count == 1 ? "PID \(primary.process.pid)" : "\(pids.count) processes"
-        return "\(processText) · \(ports.count) listening port\(ports.count == 1 ? "" : "s")"
+    var subtitle: String {
+        if pids.count > 1 { return "\(pids.count) processes" }
+        let pid = "PID \(primary.process.pid)"
+        return primary.inference.label == primary.process.command ? pid : "\(primary.process.command) · \(pid)"
     }
 }
 
@@ -895,20 +857,23 @@ private struct ListenerGroup: Identifiable {
 ///
 /// Interactive rows (with `onSelect`) are a card lying on an action layer: Close (red) under the
 /// leading edge, when closable, and Details (blue) under the trailing edge. Drag right to close,
-/// left for details. A disclosure chevron is a separate control that folds a process
-/// group; it never changes what a row tap or a left swipe does.
+/// left for details. Dragging, by mouse
+/// or two-finger trackpad swipe, slides the card across the layer, and letting go past the
+/// threshold runs the uncovered action. Swiping to close is the confirmation: no review page.
 private struct PortRow: View {
-    let port: Int
-    var portLabel: String?
+    let port: Int?
+    var extraPorts = 0
     var icon: Activity?
     let title: String
     var subtitle: String?
     var trailing: String?
     var isLAN = false
+    var allowsSwipe = true
+    /// Expanded process headers put their icon in the now-vacant port column.
+    var alignIdentityWithPorts = false
     /// Some(expanded) for a row that folds; the chevron is only ever a fold control.
     var disclosure: Bool?
     var onSelect: (() -> Void)?
-    var onToggleDisclosure: (() -> Void)?
     var onClose: (() -> Void)?
 
     @StateObject private var swipe = SwipeTracker()
@@ -921,7 +886,27 @@ private struct PortRow: View {
     private var trailingReveal: CGFloat { max(0, -swipe.offset) }
     private var isLifted: Bool { swipe.offset != 0 }
 
+    @ViewBuilder
     var body: some View {
+        if !allowsSwipe, let onSelect {
+            Button(action: onSelect) {
+                card
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .quietFocus()
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
+            }
+            .accessibilityHint(disclosure == true ? "Collapse ports" : "Expand ports")
+        } else {
+            swipableRow
+        }
+    }
+
+    private var swipableRow: some View {
         card
             .offset(x: swipe.offset)
             .background { actionLayer }
@@ -946,16 +931,33 @@ private struct PortRow: View {
             .accessibilityAction { onSelect?() }
             .accessibilityActions {
                 if let onClose {
-                    Button("Close Port \(String(port))", action: onClose)
+                    Button("Close Port \(port.map(String.init) ?? "")", action: onClose)
                 }
             }
     }
 
     private var card: some View {
         HStack(spacing: 10) {
-            Text(portLabel ?? String(port))
-                .font(.system(.callout, design: .monospaced).weight(.semibold))
-            .frame(width: 76, alignment: .leading)
+            if !alignIdentityWithPorts {
+                HStack(spacing: 4) {
+                    if let port {
+                        Text(String(port))
+                            .font(.system(.callout, design: .monospaced).weight(.semibold))
+                    } else {
+                        Color.clear.frame(width: 1)
+                    }
+                    if extraPorts > 0 {
+                        Text("+\(extraPorts)")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1.5)
+                            .background(Color.secondary.opacity(0.15), in: Capsule())
+                            .transition(.offset(y: 10).combined(with: .opacity))
+                    }
+                }
+                .frame(width: 76, alignment: .leading)
+            }
 
             if let icon {
                 ProcessIconView(activity: icon, size: 22)
@@ -985,18 +987,10 @@ private struct PortRow: View {
                 LANBadge()
             }
             if let disclosure {
-                Button(action: { onToggleDisclosure?() }) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(disclosure ? 90 : 0))
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .quietFocus()
-                .accessibilityLabel(disclosure ? "Hide ports" : "Show ports")
-                .accessibilityHint("Shows or hides the ports owned by this process")
-                .help(disclosure ? "Hide ports" : "Show ports")
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(disclosure ? 90 : 0))
             }
         }
         .padding(.horizontal, 8)
@@ -1015,7 +1009,7 @@ private struct PortRow: View {
     /// trailing half. Each label is centred in whatever part of its side is uncovered.
     @ViewBuilder
     private var actionLayer: some View {
-        if onSelect != nil && swipe.offset != 0 {
+        if allowsSwipe && onSelect != nil && swipe.offset != 0 {
             HStack(spacing: 0) {
                 side(onClose == nil ? .locked : .close, reveal: leadingReveal, alignment: .leading)
                 side(.details, reveal: trailingReveal, alignment: .trailing)
