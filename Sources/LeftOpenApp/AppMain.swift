@@ -158,6 +158,21 @@ final class MenuModel: ObservableObject {
         await execute(plan)
     }
 
+    /// A completed right swipe is an explicit direct-close gesture. The service still prepares
+    /// and re-verifies the process identity immediately before sending SIGTERM.
+    func closeNow(_ activity: Activity) async {
+        guard !isPreparingClose && !isClosing else { return }
+        notice = nil
+        do {
+            let plan = try await Task.detached(priority: .utility) {
+                try CloseService.prepare(port: activity.listener.port, pid: activity.process.pid)
+            }.value
+            await execute(plan)
+        } catch {
+            post(Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)"))
+        }
+    }
+
     private func execute(_ plan: ClosePlan) async {
         isClosing = true
         defer { isClosing = false }

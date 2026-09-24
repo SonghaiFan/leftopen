@@ -164,6 +164,10 @@ struct MenuPanel: View {
         Task { await model.previewClose(activity) }
     }
 
+    private func closeNow(_ activity: Activity) {
+        Task { await model.closeNow(activity) }
+    }
+
     // MARK: - Layout
 
     var body: some View {
@@ -470,7 +474,7 @@ struct MenuPanel: View {
                 disclosure: foldable ? expanded : nil,
                 onSelect: { foldable ? showProcessDetails(group) : showDetails(group.primary) },
                 onToggleDisclosure: foldable ? { toggle(group) } : nil,
-                onClose: closeTarget.map { target in { close(target) } }
+                onClose: closeTarget.map { target in { closeNow(target) } }
             )
             .contextMenu { contextMenu(for: group.activities) }
             ForEach(Array(listeners.dropFirst().prefix(revealed).enumerated()), id: \.element.id) { index, activity in
@@ -494,7 +498,7 @@ struct MenuPanel: View {
                 : "\(activity.process.command) · PID \(activity.process.pid)",
             isLAN: activity.scope == .lan,
             onSelect: { showDetails(activity) },
-            onClose: closeTarget.map { target in { close(target) } }
+            onClose: closeTarget.map { target in { closeNow(target) } }
         )
         .contextMenu { contextMenu(for: [activity]) }
     }
@@ -890,8 +894,8 @@ private struct ListenerGroup: Identifiable {
 /// One row style for every port list in the panel.
 ///
 /// Interactive rows (with `onSelect`) are a card lying on an action layer: Close (red) under the
-/// leading edge, when closable, and Details (blue) under the trailing edge. Drag right to review
-/// Close, left for details. A disclosure chevron is a separate control that folds a process
+/// leading edge, when closable, and Details (blue) under the trailing edge. Drag right to close,
+/// left for details. A disclosure chevron is a separate control that folds a process
 /// group; it never changes what a row tap or a left swipe does.
 private struct PortRow: View {
     let port: Int
