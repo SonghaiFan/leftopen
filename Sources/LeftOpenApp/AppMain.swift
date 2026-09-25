@@ -73,6 +73,8 @@ final class MenuModel: ObservableObject {
     @Published private(set) var notice: Notice?
     @Published var selectedActivityID: String?
     @Published var lastRefresh: Date?
+    /// Rows hidden optimistically after a completed swipe while the safe close check runs.
+    @Published private(set) var closingActivityIDs: Set<String> = []
 
     private var refreshLoop: Task<Void, Never>?
     private var settingsObserver: AnyCancellable?
@@ -80,9 +82,11 @@ final class MenuModel: ObservableObject {
     /// The scan minus ports the user chose to ignore, so every count agrees with the list.
     var visible: ScanSnapshot {
         let ignored = AppSettings.shared.ignoredPorts
-        guard !ignored.isEmpty else { return snapshot }
+        guard !ignored.isEmpty || !closingActivityIDs.isEmpty else { return snapshot }
         return ScanSnapshot(
-            activities: snapshot.activities.filter { !ignored.contains($0.listener.port) },
+            activities: snapshot.activities.filter {
+                !ignored.contains($0.listener.port) && !closingActivityIDs.contains($0.id)
+            },
             limitations: snapshot.limitations
         )
     }
@@ -158,10 +162,20 @@ final class MenuModel: ObservableObject {
         await execute(plan)
     }
 
-    /// A completed right swipe is an explicit direct-close gesture. The service still prepares
-    /// and re-verifies the process identity immediately before sending SIGTERM.
+    /// Swipe-to-close: the swipe past the threshold is the confirmation, so the plan is prepared
+    /// and executed without the review page. Identity checks in CloseService still apply.
     func closeNow(_ activity: Activity) async {
         guard !isPreparingClose && !isClosing else { return }
+        isPreparingClose = true
+        _ = withAnimation(.easeOut(duration: 0.16)) {
+            closingActivityIDs.insert(activity.id)
+        }
+        defer {
+            isPreparingClose = false
+            _ = withAnimation(.easeOut(duration: 0.16)) {
+                closingActivityIDs.remove(activity.id)
+            }
+        }
         notice = nil
         do {
             let plan = try await Task.detached(priority: .utility) {

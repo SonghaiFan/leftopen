@@ -63,6 +63,7 @@ struct MenuPanel: View {
         // Ignored ports stay out of the list unless a search asks for them.
         guard !search.isEmpty else { return model.visible.activities }
         return model.snapshot.activities.filter { activity in
+            guard !model.closingActivityIDs.contains(activity.id) else { return false }
             let fields = [
                 String(activity.listener.port), String(activity.process.pid),
                 activity.inference.label, activity.process.command,
