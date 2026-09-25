@@ -1,8 +1,93 @@
 import Darwin
+import Network
 import XCTest
 @testable import LeftOpenCore
 
 final class LeftOpenCoreTests: XCTestCase {
+    func testBrowserAddressUsesObservedBindAddress() {
+        func url(_ addresses: [String]) -> String? {
+            let listener = Listener(pid: 42, command: "node", uid: 501, user: nil,
+                                    port: 3000, addresses: addresses)
+            return BrowserAddress.candidateURL(for: listener)?.absoluteString
+        }
+
+        XCTAssertEqual(url(["127.0.0.1"]), "http://127.0.0.1:3000")
+        XCTAssertEqual(url(["0.0.0.0"]), "http://localhost:3000")
+        XCTAssertEqual(url(["*"]), "http://localhost:3000")
+        XCTAssertEqual(url(["[::]"]), "http://[::1]:3000")
+        XCTAssertEqual(url(["[::1]"]), "http://[::1]:3000")
+        XCTAssertEqual(url(["192.168.1.20"]), "http://192.168.1.20:3000")
+        XCTAssertEqual(url(["127.0.0.1", "192.168.1.20"]), "http://192.168.1.20:3000")
+        XCTAssertNil(url(["not-an-address"]))
+
+        let listener = Listener(pid: 42, command: "service", uid: 501, user: nil,
+                                port: 3000, addresses: ["192.168.1.20"])
+        XCTAssertEqual(BrowserAddress.probeURLs(for: listener).map(\.absoluteString), [
+            "https://192.168.1.20:3000", "http://192.168.1.20:3000",
+        ])
+    }
+
+    func testWebProbeShowsOnlyRespondingHTTPService() async {
+        let listener = Listener(pid: 42, command: "service", uid: 501, user: nil,
+                                port: 3000, addresses: ["127.0.0.1"])
+        let httpConfig = URLSessionConfiguration.ephemeral
+        httpConfig.protocolClasses = [HeadOnlyHTTPProtocol.self]
+        let httpSession = URLSession(configuration: httpConfig)
+        let found = await WebProbe.detect(listener, using: httpSession)
+        XCTAssertEqual(found?.absoluteString, "http://127.0.0.1:3000")
+        httpSession.invalidateAndCancel()
+
+        let otherConfig = URLSessionConfiguration.ephemeral
+        otherConfig.protocolClasses = [NonHTTPProtocol.self]
+        let otherSession = URLSession(configuration: otherConfig)
+        let missing = await WebProbe.detect(listener, using: otherSession)
+        XCTAssertNil(missing)
+        otherSession.invalidateAndCancel()
+
+        let untrustedConfig = URLSessionConfiguration.ephemeral
+        untrustedConfig.protocolClasses = [UntrustedHTTPSProtocol.self]
+        let untrustedSession = URLSession(configuration: untrustedConfig)
+        let untrusted = await WebProbe.detect(listener, using: untrustedSession)
+        XCTAssertNil(untrusted)
+        untrustedSession.invalidateAndCancel()
+
+        let redirectConfig = URLSessionConfiguration.ephemeral
+        redirectConfig.protocolClasses = [RedirectHTTPProtocol.self]
+        let redirectSession = URLSession(configuration: redirectConfig)
+        let redirect = await WebProbe.detect(listener, using: redirectSession)
+        XCTAssertEqual(redirect?.absoluteString, "http://127.0.0.1:3000")
+        redirectSession.invalidateAndCancel()
+    }
+
+    func testWebProbeAgainstRealLoopbackHTTP() async throws {
+        let server = try NWListener(using: .tcp, on: .any)
+        defer { server.cancel() }
+        let queue = DispatchQueue(label: "leftopen.web-probe-test")
+        let ready = expectation(description: "Loopback server ready")
+        server.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        server.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            connection.receive(minimumIncompleteLength: 5, maximumLength: 4096) { data, _, _, _ in
+                guard let data, String(decoding: data, as: UTF8.self).hasPrefix("HEAD ") else {
+                    connection.cancel()
+                    return
+                }
+                let response = Data("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        server.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 2)
+
+        let port = try XCTUnwrap(server.port.map { Int($0.rawValue) })
+        let listener = Listener(pid: 42, command: "service", uid: 501, user: nil,
+                                port: port, addresses: ["127.0.0.1"])
+        let found = await WebProbe.detect(listener)
+        XCTAssertEqual(found?.absoluteString, "http://127.0.0.1:\(port)")
+    }
+
     func testLsofMergesIPv4AndIPv6ForSamePIDAndPort() {
         let output = """
         p42
@@ -230,4 +315,80 @@ final class LeftOpenCoreTests: XCTestCase {
         return Activity(listener: listener, process: process, parentChain: [], projectMarker: nil,
             applicationBundle: bundle, scope: .local, inference: inference)
     }
+}
+
+private final class HeadOnlyHTTPProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        if url.scheme == "https" {
+            client?.urlProtocol(self, didFailWithError: URLError(.secureConnectionFailed))
+            return
+        }
+        guard request.httpMethod == "HEAD",
+              let response = HTTPURLResponse(url: url, statusCode: 404,
+                                             httpVersion: "HTTP/1.1", headerFields: nil) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() { }
+}
+
+private final class NonHTTPProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        client?.urlProtocol(self, didReceive: URLResponse(url: url, mimeType: nil,
+            expectedContentLength: 0, textEncodingName: nil), cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() { }
+}
+
+private final class UntrustedHTTPSProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        if url.scheme == "https" {
+            client?.urlProtocol(self, didFailWithError: URLError(.serverCertificateUntrusted))
+        } else if let response = HTTPURLResponse(url: url, statusCode: 200,
+                                                 httpVersion: "HTTP/1.1", headerFields: nil) {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() { }
+}
+
+private final class RedirectHTTPProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        if url.scheme == "https" {
+            client?.urlProtocol(self, didFailWithError: URLError(.secureConnectionFailed))
+            return
+        }
+        let response = HTTPURLResponse(url: url, statusCode: url.host == "127.0.0.1" ? 302 : 200,
+            httpVersion: "HTTP/1.1", headerFields: ["Location": "https://example.com/"])
+        if let response {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() { }
 }

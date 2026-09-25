@@ -14,6 +14,7 @@ struct MenuPanel: View {
     @State private var foldTasks: [String: Task<Void, Never>] = [:]
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
+    @State private var webURLs: [String: URL] = [:]
     @State private var protectedExpanded: Bool
     @FocusState private var searchFocused: Bool
 
@@ -26,6 +27,35 @@ struct MenuPanel: View {
 
     private var selectedActivity: Activity? {
         model.snapshot.activities.first { $0.id == model.selectedActivityID }
+    }
+
+    private var webProbeIdentity: [String] {
+        let minute = Int((model.lastRefresh?.timeIntervalSince1970 ?? 0) / 60)
+        return [String(minute)] + model.visible.activities.map { activity in
+            "\(activity.id):\(activity.listener.addresses.sorted().joined(separator: ","))"
+        }.sorted()
+    }
+
+    /// Probe only while the panel is present, four ports at a time. Results are refreshed when
+    /// the listener set changes or after a minute, so a recycled PID cannot keep an old URL.
+    private func detectWebServices() async {
+        let activities = model.visible.activities
+        webURLs = [:]
+        for start in stride(from: 0, to: activities.count, by: 4) {
+            guard !Task.isCancelled else { return }
+            let batch = Array(activities[start..<min(start + 4, activities.count)])
+            await withTaskGroup(of: (String, URL?).self) { group in
+                for activity in batch {
+                    group.addTask {
+                        (activity.id, await WebProbe.detect(activity.listener))
+                    }
+                }
+                for await (id, url) in group {
+                    guard !Task.isCancelled else { group.cancelAll(); return }
+                    if let url { webURLs[id] = url }
+                }
+            }
+        }
     }
 
     private var filteredActivities: [Activity] {
@@ -182,6 +212,7 @@ struct MenuPanel: View {
         .background(panelBackground)
         .animation(motion, value: path)
         .animation(motion, value: model.notice?.id)
+        .task(id: webProbeIdentity) { await detectWebServices() }
         .onChange(of: depth) { _, newDepth in
             searchFocused = newDepth == 0
         }
@@ -265,7 +296,7 @@ struct MenuPanel: View {
                 Text("·")
                 Text("\(model.lanPortCount) LAN")
                     .foregroundStyle(Color(nsColor: .systemOrange))
-                    .help("LAN-facing means a non-loopback bind address was observed. Firewall and actual reachability were not checked.")
+                    .help("LAN-facing means a non-loopback or wildcard bind. Localhost may still work; other devices need this Mac's LAN address and firewall access.")
             }
         }
         .font(.caption)
@@ -443,31 +474,36 @@ struct MenuPanel: View {
             let revealed = foldable ? min(revealedCounts[group.id] ?? 0, group.activities.count) : 0
             let listeners = group.activities.sorted { $0.listener.port < $1.listener.port }
             if foldable {
-                PortRow(
-                    port: expanded ? nil : group.ports[0],
-                    extraPorts: expanded ? 0 : group.ports.count - 1,
-                    icon: group.primary,
-                    title: group.primary.inference.label,
-                    subtitle: group.subtitle,
-                    isLAN: group.scope == .lan,
-                    allowsSwipe: false,
-                    alignIdentityWithPorts: expanded,
-                    disclosure: expanded,
-                    onSelect: { toggle(group) },
-                    onClose: nil
-                )
-                .contextMenu { contextMenu(for: group.activities) }
-
-                ForEach(Array(listeners.prefix(revealed).enumerated()), id: \.element.id) { index, activity in
-                    VStack(spacing: 0) {
-                        listenerRow(activity)
-                        if index < listeners.count - 1 {
-                            Divider().padding(.leading, 14)
-                        }
+                VStack(spacing: 0) {
+                    if expanded {
+                        Divider().padding(.horizontal, 14)
                     }
-                    .zIndex(-Double(index + 1))
-                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+
+                    PortRow(
+                        port: expanded ? nil : group.ports[0],
+                        extraPorts: expanded ? 0 : group.ports.count - 1,
+                        icon: group.primary,
+                        title: group.primary.inference.label,
+                        subtitle: group.subtitle,
+                        isLAN: group.scope == .lan,
+                        allowsSwipe: false,
+                        alignIdentityWithPorts: expanded,
+                        disclosure: expanded,
+                        onSelect: { toggle(group) },
+                        onClose: nil
+                    )
+                    .contextMenu { contextMenu(for: group.activities) }
+
+                    ForEach(Array(listeners.prefix(revealed)), id: \.id) { activity in
+                        listenerRow(activity)
+                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                    }
+
+                    if expanded {
+                        Divider().padding(.horizontal, 14)
+                    }
                 }
+                .animation(motion, value: revealed)
             } else if let activity = listeners.first {
                 PortRow(
                     port: activity.listener.port,
@@ -530,7 +566,8 @@ struct MenuPanel: View {
     private func portPage(_ activity: Activity) -> some View {
         let port = activity.listener.port
         let protection = CloseService.protectionReason(for: activity)
-        let folder = activity.projectMarker?.root ?? activity.process.cwd
+        let webURL = browserURL(for: activity)
+        let folder = revealTarget(for: activity)
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
@@ -546,41 +583,45 @@ struct MenuPanel: View {
                     ScopeLabel(scope: activity.scope)
                 }
 
-                HStack(spacing: 6) {
-                    Button {
-                        openBrowser(port)
-                    } label: {
-                        Label("Open", systemImage: "safari")
-                    }
-                    .keyboardShortcut("o", modifiers: .command)
-                    .help("Open \(localURL(port)) (⌘O)")
-                    Button {
-                        copy(localURL(port))
-                    } label: {
-                        Label("Copy URL", systemImage: "link")
-                    }
-                    .help("Copy \(localURL(port))")
-                    if let folder {
-                        Button {
-                            reveal(folder)
-                        } label: {
-                            Label("Reveal", systemImage: "folder")
+                if webURL != nil || folder != nil || protection == nil {
+                    HStack(spacing: 6) {
+                        if let webURL {
+                            Button {
+                                NSWorkspace.shared.open(webURL)
+                            } label: {
+                                Label("Open", systemImage: "safari")
+                            }
+                            .keyboardShortcut("o", modifiers: .command)
+                            .help("Open verified web endpoint: \(webURL.absoluteString) (⌘O)")
+                            Button {
+                                copy(webURL.absoluteString)
+                            } label: {
+                                Label("Copy URL", systemImage: "link")
+                            }
+                            .help("Copy verified URL: \(webURL.absoluteString)")
                         }
-                        .help("Reveal \(compactPath(folder)) in Finder")
-                    }
-                    Spacer(minLength: 0)
-                    if protection == nil {
-                        Button {
-                            close(activity)
-                        } label: {
-                            Text("Close…").foregroundStyle(Color(nsColor: .systemRed))
+                        if let folder {
+                            Button {
+                                reveal(folder)
+                            } label: {
+                                Label("Reveal", systemImage: "folder")
+                            }
+                            .help("Reveal \(compactPath(folder)) in Finder")
                         }
-                        .disabled(model.isPreparingClose || model.isClosing)
-                        .help("Review closing PID \(String(activity.process.pid))")
+                        Spacer(minLength: 0)
+                        if protection == nil {
+                            Button {
+                                close(activity)
+                            } label: {
+                                Text("Close…").foregroundStyle(Color(nsColor: .systemRed))
+                            }
+                            .disabled(model.isPreparingClose || model.isClosing)
+                            .help("Review closing PID \(String(activity.process.pid))")
+                        }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
 
                 if let protection {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -613,6 +654,9 @@ struct MenuPanel: View {
                     infoRow("Executable", compactPath(activity.process.executablePath))
                     infoRow("Folder", compactPath(activity.process.cwd))
                     infoRow("Addresses", activity.listener.addresses.joined(separator: ", "))
+                    if let webURL {
+                        infoRow("Web URL", webURL.absoluteString)
+                    }
                 }
 
                 Divider()
@@ -777,13 +821,21 @@ struct MenuPanel: View {
     private func contextMenu(for activities: [Activity]) -> some View {
         let ports = Array(Set(activities.map(\.listener.port))).sorted()
         let primary = activities[0]
-        if ports.count == 1 {
-            Button("Open in Browser") { openBrowser(ports[0]) }
-            Button("Copy URL") { copy(localURL(ports[0])) }
-        } else {
+        let webTargets = activities.compactMap { activity -> WebTarget? in
+            browserURL(for: activity).map { WebTarget(activity: activity, url: $0) }
+        }
+        if webTargets.count == 1, let target = webTargets.first {
+            Button("Open in Browser") { NSWorkspace.shared.open(target.url) }
+            Button("Copy URL") { copy(target.url.absoluteString) }
+        } else if webTargets.count > 1 {
             Menu("Open in Browser") {
-                ForEach(ports, id: \.self) { port in
-                    Button("localhost:\(String(port))") { openBrowser(port) }
+                ForEach(webTargets) { target in
+                    Button(String(target.activity.listener.port)) { NSWorkspace.shared.open(target.url) }
+                }
+            }
+            Menu("Copy URL") {
+                ForEach(webTargets) { target in
+                    Button(String(target.activity.listener.port)) { copy(target.url.absoluteString) }
                 }
             }
         }
@@ -791,7 +843,7 @@ struct MenuPanel: View {
             copy(ports.map(String.init).joined(separator: ", "))
         }
         Button("Copy PID") { copy(String(primary.process.pid)) }
-        if let folder = primary.projectMarker?.root ?? primary.process.cwd {
+        if let folder = revealTarget(for: primary) {
             Divider()
             Button("Reveal in Finder") { reveal(folder) }
         }
@@ -806,12 +858,15 @@ struct MenuPanel: View {
         }
     }
 
-    private func localURL(_ port: Int) -> String { "http://localhost:\(port)" }
+    private func browserURL(for activity: Activity) -> URL? {
+        webURLs[activity.id]
+    }
 
-    private func openBrowser(_ port: Int) {
-        if let url = URL(string: localURL(port)) {
-            NSWorkspace.shared.open(url)
-        }
+    private func revealTarget(for activity: Activity) -> String? {
+        let candidates = [activity.projectMarker?.root, activity.applicationBundle?.path,
+                          activity.inference.category == .project ? activity.process.cwd : nil,
+                          activity.process.executablePath]
+        return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0) }
     }
 
     private func copy(_ string: String) {
@@ -820,11 +875,17 @@ struct MenuPanel: View {
     }
 
     private func reveal(_ path: String) {
-        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 }
 
 // MARK: - Components
+
+private struct WebTarget: Identifiable {
+    let activity: Activity
+    let url: URL
+    var id: String { activity.id }
+}
 
 /// The panel's surface colour, shared by the pages and the opaque row cards that sit on it.
 private func panelSurface(_ colorScheme: ColorScheme) -> Color {
@@ -1206,7 +1267,7 @@ private struct LANBadge: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(Color(nsColor: .systemOrange).opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .help("LAN-facing bind address; actual reachability was not checked")
+            .help("Bound beyond loopback. Localhost may still work, but access from another device is not verified.")
     }
 }
 
@@ -1262,7 +1323,7 @@ private struct ScopeLabel: View {
         .font(.caption)
         .accessibilityElement(children: .combine)
         .help(scope == .lan
-            ? "Non-loopback bind address observed. Firewall and actual reachability were not checked."
+            ? "Non-loopback or wildcard bind observed. Localhost may still work; LAN reachability depends on the actual address and firewall."
             : "Only loopback bind addresses were observed.")
     }
 }
