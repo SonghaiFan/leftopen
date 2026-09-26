@@ -131,11 +131,11 @@ Scripts/sign-and-notarize.sh
 
 ### Step 5: Prepare Release Artifact and Calculate Checksum
 
-Copy the notarized release zip and generate its SHA-256 hash:
+The notarized `LeftOpen-release.zip` is the release artifact. Publish it under this exact name: the Homebrew cask downloads `LeftOpen-release.zip`. Generate its SHA-256 hash:
 
 ```bash
-cp "${LEFTOPEN_OUTPUT_DIR}/LeftOpen-release.zip" LeftOpen.zip
-SHA256_HASH=$(shasum -a 256 LeftOpen.zip | awk '{print $1}')
+RELEASE_ZIP="${LEFTOPEN_OUTPUT_DIR}/LeftOpen-release.zip"
+SHA256_HASH=$(shasum -a 256 "$RELEASE_ZIP" | awk '{print $1}')
 echo "SHA256: $SHA256_HASH"
 ```
 
@@ -145,9 +145,12 @@ echo "SHA256: $SHA256_HASH"
 
 Commit all version updates, tag the commit, and push to GitHub:
 
+Review `git status` first, then stage everything, including tests, docs and deletions:
+
 ```bash
-git add Package.swift README.md Resources/Info.plist Scripts/ docs/ Sources/
-git commit -m "Release v${NEW_VERSION}: bump version and release build"
+git status --short
+git add -A
+git commit -m "Release v${NEW_VERSION}"
 git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
 git push origin main
 git push origin "v${NEW_VERSION}"
@@ -160,8 +163,8 @@ git push origin "v${NEW_VERSION}"
 Publish the release on GitHub with the notarized zip attached:
 
 ```bash
-gh release create "v${NEW_VERSION}" LeftOpen.zip \
-  --title "v${NEW_VERSION} - Native leftopen CLI & App Bundle" \
+gh release create "v${NEW_VERSION}" "$RELEASE_ZIP" \
+  --title "LeftOpen v${NEW_VERSION}" \
   --notes "LeftOpen ${NEW_VERSION}
 
 - Universal app and bundled CLI for Apple Silicon and Intel Macs (macOS 14+)
@@ -187,7 +190,7 @@ Update the Cask formula in `songhaifan/homebrew-tap`:
      version "<NEW_VERSION>"
      sha256 "<SHA256_HASH>"
 
-     url "https://github.com/SonghaiFan/leftopen/releases/download/v#{version}/LeftOpen.zip"
+     url "https://github.com/SonghaiFan/leftopen/releases/download/v#{version}/LeftOpen-release.zip"
      name "LeftOpen"
      desc "See what your tools left running on localhost"
      homepage "https://github.com/SonghaiFan/leftopen"
@@ -230,13 +233,13 @@ Verify distribution channels and local tools:
    ```
 
 3. **Verify Published Architectures**:
-   - Download the published `LeftOpen.zip`, extract it into a new directory, and run `Scripts/verify-universal-app.sh /path/to/extracted/LeftOpen.app` to check both executables.
+   - Download the published `LeftOpen-release.zip`, extract it into a new directory, and run `Scripts/verify-universal-app.sh /path/to/extracted/LeftOpen.app` to check both executables.
    - Test the app and CLI on Apple Silicon and Intel Macs when available. Record hardware coverage separately from build and signing verification; an `x86_64` run under Rosetta is useful but does not replace an Intel hardware check.
 
-4. **Update Local CLI**:
+4. **Upgrade the Local Install**:
+   The cask links the bundled CLI into Homebrew's `bin`, so upgrading the cask updates both the app and `leftopen`. Do not keep a separate copy in `~/.local/bin`: it would shadow the Homebrew CLI and go stale.
    ```bash
-   cp "${LEFTOPEN_OUTPUT_DIR}/LeftOpen.app/Contents/MacOS/leftopen" ~/.local/bin/leftopen
-   chmod +x ~/.local/bin/leftopen
+   brew upgrade --cask songhaifan/tap/leftopen
    leftopen -v
    leftopen list
    ```
@@ -249,7 +252,9 @@ Verify distribution channels and local tools:
   - Run `xcrun notarytool log <SUBMISSION_ID> --keychain-profile leftopen-notary` to inspect Apple's diagnostic log.
   - Common cause: a nested executable in `Contents/MacOS/` was not individually signed before the outer `.app` was signed.
 - **Homebrew Checksum Mismatch**:
-  - Ensure `LeftOpen.zip` was generated from `LeftOpen-release.zip` *after* `xcrun stapler staple` completed.
-  - Verify `shasum -a 256 LeftOpen.zip` matches the string in `Casks/leftopen.rb`.
+  - Ensure `LeftOpen-release.zip` was created *after* `xcrun stapler staple` completed (the signing script does this).
+  - Verify `shasum -a 256 "${LEFTOPEN_OUTPUT_DIR}/LeftOpen-release.zip"` matches the string in `Casks/leftopen.rb`.
+- **Homebrew Download 404**:
+  - The GitHub release must have an asset named exactly `LeftOpen-release.zip`, as in the cask `url`.
 - **Refusing to Overwrite Output Directory**:
   - `Scripts/build-app.sh` and `Scripts/sign-and-notarize.sh` prevent overwriting existing output folders. Always use a distinct directory (`dist/vX.Y.Z`).

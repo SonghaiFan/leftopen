@@ -45,7 +45,7 @@ Supports Apple Silicon and Intel Macs running macOS Sonoma (14.0+). The app and 
 
 ### Manual download
 
-Get `LeftOpen.zip` from [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest), unzip, and move `LeftOpen.app` to `/Applications`.
+Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest), unzip, and move `LeftOpen.app` to `/Applications`.
 
 ---
 

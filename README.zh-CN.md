@@ -45,7 +45,7 @@ brew install --cask songhaifan/tap/leftopen
 
 ### 手动下载
 
-前往 [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest) 下载 `LeftOpen.zip`，解压后将 `LeftOpen.app` 移至「应用程序」。
+前往 [GitHub Releases](https://github.com/SonghaiFan/leftopen/releases/latest) 下载 `LeftOpen-release.zip`，解压后将 `LeftOpen.app` 移至「应用程序」。
 
 ---
 

@@ -35,9 +35,9 @@ LEFTOPEN_NOTARY_PROFILE="$LEFTOPEN_NOTARY_PROFILE" \
 LEFTOPEN_BUNDLE_ID="$LEFTOPEN_BUNDLE_ID" \
 Scripts/sign-and-notarize.sh
 
-# 6. Checksum and artifact
-cp "${LEFTOPEN_OUTPUT_DIR}/LeftOpen-release.zip" LeftOpen.zip
-shasum -a 256 LeftOpen.zip
+# 6. Checksum (publish this exact file name; the cask downloads LeftOpen-release.zip)
+RELEASE_ZIP="${LEFTOPEN_OUTPUT_DIR}/LeftOpen-release.zip"
+shasum -a 256 "$RELEASE_ZIP"
 
 # 7. Git commit, tag, push
 git add -A
@@ -47,8 +47,8 @@ git push origin main
 git push origin "v${NEW_VERSION}"
 
 # 8. GitHub release
-gh release create "v${NEW_VERSION}" LeftOpen.zip \
-  --title "v${NEW_VERSION} - Native leftopen CLI & App Bundle" \
+gh release create "v${NEW_VERSION}" "$RELEASE_ZIP" \
+  --title "LeftOpen v${NEW_VERSION}" \
   --notes "LeftOpen ${NEW_VERSION}"
 
 # 9. Update Homebrew tap
@@ -58,7 +58,9 @@ gh release create "v${NEW_VERSION}" LeftOpen.zip \
 brew update && brew info --cask songhaifan/tap/leftopen
 brew fetch --cask songhaifan/tap/leftopen
 curl -sI https://songhaifan.github.io/leftopen/
-# Download and extract the published LeftOpen.zip into a new directory;
+# Download and extract the published LeftOpen-release.zip into a new directory;
 # verify both executables contain arm64 + x86_64 with verify-universal-app.sh.
 # Record Apple Silicon/Intel hardware checks separately from Rosetta checks.
+# Upgrade the local install through the cask; don't copy the CLI to ~/.local/bin.
+brew upgrade --cask songhaifan/tap/leftopen && leftopen -v
 ```
