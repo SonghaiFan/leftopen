@@ -1,7 +1,8 @@
 <div align="center">
   <img src="assets/logo.svg" alt="LeftOpen Logo" width="48" height="80" />
   <h1>LeftOpen</h1>
-  <p><em>See what your tools left running on localhost, and gently close them.</em></p>
+  <p><strong>Native macOS Menu Bar Port Manager &amp; CLI</strong></p>
+  <p><em>See what your tools left running on localhost, identify projects, and gently close them.</em></p>
   <p>把那些虚掩着的门，轻轻关上。</p>
 
   <p>
@@ -58,6 +59,15 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 - **Local vs LAN.** Tells apart ports bound to `127.0.0.1` from ones on `0.0.0.0` or a LAN address.
 - **Nothing running in the background.** Native SwiftUI `MenuBarExtra`. No daemon, no Dock icon, no telemetry. The only request that leaves this Mac is a daily check of the latest GitHub release, which you can turn off in Settings.
 - **Same engine in the terminal.** The app ships a `leftopen` CLI with identical inference and safety rules.
+
+---
+
+## Why LeftOpen? (Common Use Cases)
+
+- **Fix "Port already in use" (`EADDRINUSE`)**: When your dev server fails because port 3000, 5173, or 8080 is blocked by a lingering process, LeftOpen shows you what's running and shuts it down gently—without restarting your terminal or machine.
+- **Identify the project, not just a generic `node` or `python` PID**: Tools like `lsof -i` or `kill-port` only report raw PIDs or ambiguous process names. LeftOpen tracks the working directory and project root (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `.git`), giving you full context before taking action.
+- **Spot accidental LAN exposure**: See at a glance whether a port is bound strictly to `127.0.0.1` (local only) or `0.0.0.0` (accessible to anyone on your local network/Wi-Fi).
+- **Graceful SIGTERM vs. destructive `kill -9`**: Unlike blunt force-killing scripts, LeftOpen re-verifies PID and start time, shows sibling ports, and issues a standard `SIGTERM` so servers can clean up sockets, flush logs, and exit cleanly.
 
 ---
 

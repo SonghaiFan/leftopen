@@ -1,18 +1,117 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LeftOpen - See what is listening on localhost</title>
-  <meta name="description" content="A native macOS menu bar app for seeing what is listening on localhost, identifying its project and closing it safely.">
+  <title>LeftOpen — macOS Menu Bar Port Manager &amp; CLI | See &amp; Close Localhost Ports</title>
+  <meta name="description" content="LeftOpen is a native macOS menu bar app and CLI to see what is listening on localhost, identify projects and processes, check LAN exposure, and close ports safely.">
+  <meta name="keywords" content="macos port manager, kill port mac, localhost ports, port 3000 already in use, find process using port mac, lsof alternative, see listening ports, swiftui menubar, mac developer tools, stop dev server, kill-port mac, close port macos">
+  <meta name="author" content="Songhai Fan">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://songhaifan.github.io/leftopen/">
+  <link rel="alternate" hreflang="x-default" href="https://songhaifan.github.io/leftopen/">
+  <link rel="alternate" hreflang="en" href="https://songhaifan.github.io/leftopen/">
+  <link rel="alternate" hreflang="zh-CN" href="https://songhaifan.github.io/leftopen/">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="apple-touch-icon" href="assets/AppIcon.png">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)">
-  <meta property="og:title" content="LeftOpen - See what is listening on localhost">
-  <meta property="og:description" content="Identify listening ports and gently close the ones you no longer need.">
-  <meta property="og:image" content="https://songhaifan.github.io/leftopen/assets/preview.png">
+
+  <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
+  <meta property="og:url" content="https://songhaifan.github.io/leftopen/">
+  <meta property="og:site_name" content="LeftOpen">
+  <meta property="og:title" content="LeftOpen — macOS Menu Bar Port Manager &amp; CLI">
+  <meta property="og:description" content="See what is listening on localhost, identify owning projects and processes, check LAN exposure, and close ports safely.">
+  <meta property="og:image" content="https://songhaifan.github.io/leftopen/assets/preview.png">
+  <meta property="og:image:width" content="750">
+  <meta property="og:image:height" content="920">
+  <meta property="og:image:alt" content="LeftOpen macOS menu bar panel showing listening ports and owners">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="zh_CN">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://songhaifan.github.io/leftopen/">
+  <meta name="twitter:title" content="LeftOpen — macOS Menu Bar Port Manager &amp; CLI">
+  <meta name="twitter:description" content="See what is listening on localhost, identify projects and processes, and gently close them.">
+  <meta name="twitter:image" content="https://songhaifan.github.io/leftopen/assets/preview.png">
+
+  <!-- Structured Data (Schema.org JSON-LD) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://songhaifan.github.io/leftopen/#website",
+        "url": "https://songhaifan.github.io/leftopen/",
+        "name": "LeftOpen",
+        "description": "Native macOS menu bar app and CLI to see what is listening on localhost, identify projects and processes, and gently close them.",
+        "inLanguage": ["en", "zh-CN"]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://songhaifan.github.io/leftopen/#software",
+        "name": "LeftOpen",
+        "operatingSystem": "macOS 14.0+",
+        "applicationCategory": "DeveloperApplication",
+        "url": "https://songhaifan.github.io/leftopen/",
+        "downloadUrl": "https://github.com/SonghaiFan/leftopen/releases/latest",
+        "image": "https://songhaifan.github.io/leftopen/assets/preview.png",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "description": "A native macOS menu bar app and CLI for seeing what is listening on localhost, identifying its project, checking LAN visibility, and closing it safely.",
+        "author": {
+          "@type": "Person",
+          "name": "Songhai Fan",
+          "url": "https://github.com/SonghaiFan"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://songhaifan.github.io/leftopen/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How do I fix 'Port already in use' (EADDRINUSE) on Mac?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Open LeftOpen in your macOS menu bar or run 'leftopen 3000' in your terminal. LeftOpen identifies the exact project or process occupying the port and lets you close it gently with SIGTERM."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Why use LeftOpen instead of lsof -i or kill -9?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "lsof -i only shows raw PIDs and generic names like node or python without project context. kill -9 causes hard termination without cleanup. LeftOpen walks up the directory tree to identify the project and sends a safe SIGTERM."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does LAN-visible mean in LeftOpen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "LOCAL means bound only to 127.0.0.1. LAN means the port is bound to 0.0.0.0 or a network interface, allowing other devices on the same Wi-Fi network to access it."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How to install LeftOpen on macOS?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Install LeftOpen via Homebrew by running 'brew install --cask songhaifan/tap/leftopen' or download the notarized universal binary from GitHub Releases."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
   <script>
     (function () {
       var saved;
@@ -171,6 +270,15 @@
       grid-template-columns: minmax(0, 1fr);
       gap: 42px;
       padding: 56px 0 64px;
+    }
+
+    .hero-tag {
+      margin: 0 0 16px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
 
     h1 {
@@ -371,6 +479,40 @@
     .dim { color: #86868b; }
     .lan { color: var(--accent); }
 
+    .faq-grid {
+      display: grid;
+      gap: 0;
+    }
+
+    .faq-item {
+      padding: 22px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .faq-item:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .faq-item:last-child {
+      padding-bottom: 0;
+    }
+
+    .faq-item h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      letter-spacing: -0.02em;
+    }
+
+    .faq-item p {
+      max-width: 34rem;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+      text-wrap: pretty;
+    }
+
     footer {
       display: flex;
       flex-direction: column;
@@ -473,6 +615,17 @@
         justify-self: center;
       }
 
+      .faq-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 28px;
+      }
+
+      .faq-item,
+      .faq-item:first-child {
+        padding: 18px 0 0;
+        border-top: 1px solid var(--line);
+      }
+
       .command {
         grid-template-columns: 150px minmax(0, 1fr);
         gap: 12px;
@@ -542,13 +695,15 @@
     <header class="top">
       <a class="brand" href="#top"><img src="assets/logo.svg" alt="">LeftOpen</a>
       <nav class="nav" aria-label="Primary navigation">
-        <a href="#cli">CLI</a><a class="release" href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a><a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
+        <a href="#cli">CLI</a><a href="#faq">FAQ</a><a class="release" href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a><a href="https://github.com/SonghaiFan/leftopen">GitHub</a>
         <button class="lang-toggle" id="lang" type="button" aria-label="Switch language"><span lang="zh">EN</span><span lang="en">中文</span></button>
       </nav>
     </header>
     <main id="top">
       <section class="hero" style="border-top: 0;">
         <div>
+          <p class="hero-tag" lang="zh">macOS 菜单栏端口管理与命令行工具</p>
+          <p class="hero-tag" lang="en">macOS Menu Bar Port Manager &amp; CLI</p>
           <h1 lang="zh">把虚掩着的门<br>轻轻关上。</h1><h1 lang="en">Gently close the doors<br>left ajar.</h1>
           <p class="intro" lang="zh">LeftOpen 在菜单栏里告诉你 localhost 上的端口、进程和可能关联的项目。</p>
           <p class="intro" lang="en">LeftOpen shows the ports, processes and likely projects still listening on localhost.</p>
@@ -594,8 +749,37 @@
 11434   Ollama         ollama     LOCAL
 8384    Syncthing      syncthing  <span class="lan">LAN</span></pre></div>
       </section>
+      <section id="faq">
+        <h2 lang="zh">常见问题与场景。</h2><h2 lang="en">Questions &amp; use cases.</h2>
+        <div class="faq-grid">
+          <article class="faq-item">
+            <h3 lang="zh">遇到端口被占用（Address already in use）怎么办？</h3>
+            <h3 lang="en">Fix "Port already in use" (EADDRINUSE)</h3>
+            <p lang="zh">打开 LeftOpen 菜单栏或在终端运行 <code>leftopen 3000</code>，立刻看清是哪个开发服务或项目占用了端口，一键轻柔结束，无需重启电脑。</p>
+            <p lang="en">Open LeftOpen in your menu bar or run <code>leftopen 3000</code> in your terminal. See which dev server or project owns the port and close it gently—no reboot or guess-killing needed.</p>
+          </article>
+          <article class="faq-item">
+            <h3 lang="zh">为什么不用 lsof -i 或 kill -9？</h3>
+            <h3 lang="en">Why not just lsof -i or kill -9?</h3>
+            <p lang="zh"><code>lsof</code> 往往只显示含糊的 <code>node</code> 和 PID，容易误杀其他项目；而 <code>kill -9</code> 强制终止无法执行清理钩子。LeftOpen 会向上追溯项目目录与图标，并在发 SIGTERM 前核验进程与关联端口。</p>
+            <p lang="en"><code>lsof</code> only prints raw PIDs and generic process names like <code>node</code>, risking collateral damage. <code>kill -9</code> corrupts caches. LeftOpen resolves the project directory and icons, and validates start times before sending SIGTERM.</p>
+          </article>
+          <article class="faq-item">
+            <h3 lang="zh">局域网可见（LAN）有什么安全风险？</h3>
+            <h3 lang="en">What does LAN-visible mean?</h3>
+            <p lang="zh">绑定在 <code>0.0.0.0</code> 或无线网卡 IP 的端口，同 Wi-Fi 下的其他设备可以直接访问。LeftOpen 将其醒目标记为 LAN，防止调试接口或数据库在公共网络意外暴露。</p>
+            <p lang="en">Services listening on <code>0.0.0.0</code> or your Wi-Fi IP can be reached by other devices on your network. LeftOpen flags these as LAN so dev endpoints or databases aren't accidentally exposed.</p>
+          </article>
+          <article class="faq-item">
+            <h3 lang="zh">支持哪些框架与项目推断？</h3>
+            <h3 lang="en">Which frameworks and languages are supported?</h3>
+            <p lang="zh">支持 Node.js、Vite、Next.js、Python、Go、Rust、Docker、Redis、Postgres、Ollama 等，自动解析 <code>package.json</code>、<code>pyproject.toml</code>、<code>Cargo.toml</code>、<code>go.mod</code> 和 macOS 应用程序。</p>
+            <p lang="en">Supports Node.js, Vite, Next.js, Python, Go, Rust, Docker, Redis, Postgres, Ollama and more—by inspecting working directories, manifest files, and macOS app bundles.</p>
+          </article>
+        </div>
+      </section>
     </main>
-    <footer><span lang="zh">把虚掩着的门轻轻关上。</span><span lang="en">Gently close the doors left ajar.</span><nav><a href="https://github.com/SonghaiFan/leftopen">GitHub</a><a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a><a href="https://github.com/SonghaiFan/leftopen/blob/main/LICENSE">MIT</a></nav></footer>
+    <footer><span lang="zh">把虚掩着的门轻轻关上。</span><span lang="en">Gently close the doors left ajar.</span><nav><a href="#faq">FAQ</a><a href="https://github.com/SonghaiFan/leftopen">GitHub</a><a href="https://github.com/SonghaiFan/leftopen/releases/latest">Releases</a><a href="https://github.com/SonghaiFan/leftopen/blob/main/LICENSE">MIT</a></nav></footer>
   </div>
   <script>
     document.getElementById('lang').addEventListener('click', function () {

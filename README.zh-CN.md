@@ -1,8 +1,9 @@
 <div align="center">
   <img src="assets/logo.svg" alt="LeftOpen Logo" width="48" height="80" />
   <h1>LeftOpen</h1>
+  <p><strong>原生 macOS 菜单栏端口管理工具与 CLI</strong></p>
   <p>把那些虚掩着的门，轻轻关上。</p>
-  <p><em>See what your tools left running on localhost, and gently close them.</em></p>
+  <p><em>See what your tools left running on localhost, identify projects, and gently close them.</em></p>
 
   <p>
     <a href="https://songhaifan.github.io/leftopen/"><img src="https://img.shields.io/badge/website-GitHub%20Pages-211811?style=flat-square" alt="Website" /></a>
@@ -58,6 +59,15 @@ brew install --cask songhaifan/tap/leftopen
 - **本机还是局域网。** 区分绑在 `127.0.0.1` 的端口和绑在 `0.0.0.0` / 局域网地址上的端口。
 - **没有后台常驻。** 原生 SwiftUI `MenuBarExtra`。无守护进程，无 Dock 图标，无遥测。唯一离开这台 Mac 的网络请求是每天向 GitHub 查询一次最新版本，可在设置中关闭。
 - **终端里是同一个引擎。** App 附带 `leftopen` 命令行工具，推断和安全规则完全一致。
+
+---
+
+## 为什么选择 LeftOpen？（解决的核心痛点）
+
+- **解决端口被占用问题（`EADDRINUSE` / Port in use）**：开发服务启动失败提示端口 3000、5173 或 8080 被占用时，LeftOpen 让你在菜单栏或终端快速定位残留进程并一键关闭，无需重启终端或 Mac。
+- **定位真实项目，告别模糊的 `node` / `python` PID**：`lsof -i` 和普通端口清理脚本只能提供裸 PID 或进程名。LeftOpen 自动向上追溯工作目录（识别 `package.json`、`Cargo.toml`、`pyproject.toml`、`go.mod`、`.git` 等），显示真实项目名称与应用图标。
+- **发现意外的局域网暴露（LAN Exposure）**：清晰区分仅本机可见（`127.0.0.1`）与暴露在局域网（`0.0.0.0` / 网卡 IP）的服务，防止本地开发或测试数据库在公共 Wi-Fi 中无意公开。
+- **温柔的 SIGTERM，拒绝粗暴的 `kill -9`**：关闭前二次核对 PID、启动时间与进程关联的其他端口，只发送 `SIGTERM`，给服务保留运行清理钩子与保存状态的机会，绝不误触系统进程。
 
 ---
 
