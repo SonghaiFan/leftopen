@@ -3,17 +3,30 @@ import Foundation
 enum ScanError: LocalizedError {
     case commandFailed(String, Int32)
     case missingTool(String)
+    case timedOut(String, TimeInterval)
+    case outputTooLarge(String, Int)
 
     var errorDescription: String? {
         switch self {
-        case let .commandFailed(tool, code): "\(tool) exited with status \(code)."
-        case let .missingTool(tool): "\(tool) is not available on this Mac."
+        case let .commandFailed(tool, code): L("\(tool) exited with status \(code).", "\(tool) 退出，状态码 \(code)。")
+        case let .missingTool(tool): L("\(tool) is not available on this Mac.", "这台 Mac 上没有 \(tool)。")
+        case let .timedOut(tool, seconds):
+            L("\(tool) did not finish within \(Int(seconds.rounded(.up))) s.", "\(tool) 在 \(Int(seconds.rounded(.up))) 秒内没有完成。")
+        case let .outputTooLarge(tool, bytes):
+            L("\(tool) produced more than \(bytes / (1024 * 1024)) MB of output.", "\(tool) 的输出超过 \(bytes / (1024 * 1024)) MB。")
         }
     }
 }
 
 enum CommandRunner {
-    static func output(_ executable: String, _ arguments: [String], allowEmptyLsof: Bool = false) throws -> String {
+    /// `lsof` can hang on an unresponsive network volume; a scan must fail instead of stalling forever.
+    static let defaultTimeout: TimeInterval = 10
+    static let defaultMaxOutputBytes = 8 * 1024 * 1024
+    private static let killGracePeriod: TimeInterval = 0.5
+
+    static func output(_ executable: String, _ arguments: [String], allowEmptyLsof: Bool = false,
+                       timeout: TimeInterval = defaultTimeout,
+                       maxOutputBytes: Int = defaultMaxOutputBytes) throws -> String {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             throw ScanError.missingTool(executable)
         }
@@ -23,14 +36,68 @@ enum CommandRunner {
         process.arguments = arguments
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
-        // Drain while the child runs; waiting first can deadlock on a full pipe.
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+
+        // Drain on another thread while the child runs (waiting first can deadlock on a full pipe),
+        // so the caller can give up at the deadline even if the read never returns.
+        let buffer = OutputBuffer(limit: maxOutputBytes)
+        let drained = DispatchSemaphore(value: 0)
+        let reader = stdout.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async {
+            while true {
+                let chunk = reader.availableData
+                if chunk.isEmpty || !buffer.append(chunk) { break }
+            }
+            drained.signal()
+        }
+
+        let deadline = DispatchTime.now() + timeout
+        guard drained.wait(timeout: deadline) == .success else {
+            stop(process, exited: exited)
+            throw ScanError.timedOut(executable, timeout)
+        }
+        if buffer.overflowed {
+            stop(process, exited: exited)
+            throw ScanError.outputTooLarge(executable, maxOutputBytes)
+        }
+        guard exited.wait(timeout: deadline) == .success else {
+            stop(process, exited: exited)
+            throw ScanError.timedOut(executable, timeout)
+        }
         guard process.terminationStatus == 0 || (allowEmptyLsof && process.terminationStatus == 1) else {
             throw ScanError.commandFailed(executable, process.terminationStatus)
         }
-        return String(decoding: data, as: UTF8.self)
+        return String(decoding: buffer.data, as: UTF8.self)
+    }
+
+    /// SIGTERM, then SIGKILL if the child ignores it. The termination handler has not fired, so the
+    /// PID is not yet reaped and cannot have been reused.
+    private static func stop(_ process: Process, exited: DispatchSemaphore) {
+        guard process.isRunning else { return }
+        process.terminate()
+        if exited.wait(timeout: .now() + killGracePeriod) == .timedOut {
+            kill(process.processIdentifier, SIGKILL)
+        }
+    }
+}
+
+/// Filled by the reader thread; read by the caller only after the reader has signalled.
+private final class OutputBuffer: @unchecked Sendable {
+    private let limit: Int
+    private(set) var data = Data()
+    private(set) var overflowed = false
+
+    init(limit: Int) { self.limit = limit }
+
+    func append(_ chunk: Data) -> Bool {
+        guard data.count + chunk.count <= limit else {
+            overflowed = true
+            return false
+        }
+        data.append(chunk)
+        return true
     }
 }
 
@@ -206,12 +273,20 @@ public enum Scanner {
             processTable = parseProcessTable(try CommandRunner.output("/bin/ps", ["-axo", "pid=,ppid=,etime=,rss=,comm="]))
         } catch {
             processTable = [:]
-            limitations.append("The process table was unavailable; parent evidence is incomplete.")
+            limitations.append(L("The process table was unavailable; parent evidence is incomplete.", "无法读取进程表，父进程信息不完整。"))
         }
 
         var projects: [String: ProjectMarker] = [:]
         for cwd in Set(cwdByPID.values) {
             if let project = findProject(cwd) { projects[cwd] = project }
+        }
+        let launchdJobs: [Int32: LaunchdJob]
+        do {
+            launchdJobs = try launchdJobsByPID(near: listeners.map { ($0.pid, processTable[$0.pid]?.ppid) })
+        } catch {
+            launchdJobs = [:]
+            limitations.append(L("launchd jobs were unavailable; services it restarts may be listed as closable.",
+                                  "无法读取 launchd 任务，会被自动重启的服务可能显示为可关闭。"))
         }
         let activities = listeners.map { listener in
             let table = processTable[listener.pid]
@@ -223,13 +298,52 @@ public enum Scanner {
                 rssKB: table?.rssKB)
             let parents = parentChain(for: process, in: processTable)
             let project = process.cwd.flatMap { projects[$0] }
-            let bundle = applicationBundle(for: process, parents: parents)
+            let bundle = applicationBundle(for: process, parents: parents, launchedPath: table?.executablePath)
             let inference = inferOwner(process: process, project: project, bundle: bundle)
             return Activity(listener: listener, process: process, parentChain: parents,
                 projectMarker: project, applicationBundle: bundle,
-                scope: listenerScope(listener.addresses), inference: inference)
+                scope: listenerScope(listener.addresses), inference: inference,
+                launchdJob: launchdJobs[listener.pid] ?? process.ppid.flatMap { launchdJobs[$0] })
         }
         return ScanSnapshot(activities: activities, limitations: limitations)
+    }
+
+    /// launchd jobs whose PID is one of the listeners or their direct parents (a service may run a
+    /// monitor that owns the worker). Deeper ancestors are ignored: a terminal app launched by
+    /// launchd does not manage the dev servers started inside it. GUI apps also appear as
+    /// `application.*` jobs; they are recognised by their bundle instead.
+    private static func launchdJobsByPID(near processes: [(pid: Int32, ppid: Int32?)]) throws -> [Int32: LaunchdJob] {
+        let candidates = Set(processes.flatMap { [$0.pid] + ($0.ppid.map { [$0] } ?? []) }).subtracting([0, 1])
+        let labels = parseLaunchctlList(try CommandRunner.output("/bin/launchctl", ["list"], timeout: 2))
+            .filter { candidates.contains($0.key) && !$0.value.hasPrefix("application.") }
+        var jobs: [Int32: LaunchdJob] = [:]
+        for (pid, label) in labels {
+            let details = try? CommandRunner.output("/bin/launchctl", ["print", "gui/\(getuid())/\(label)"], timeout: 2)
+            // Unknown restart behaviour is treated as KeepAlive: refusing is safer than a close that undoes itself.
+            jobs[pid] = LaunchdJob(label: label, pid: pid, keepAlive: details.map(launchctlPrintHasKeepAlive) ?? true)
+        }
+        return jobs
+    }
+
+    /// `launchctl list` rows are `PID<TAB>Status<TAB>Label`; jobs that are not running show `-`.
+    static func parseLaunchctlList(_ output: String) -> [Int32: String] {
+        var labels: [Int32: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let fields = line.split(separator: "\t", maxSplits: 2)
+            guard fields.count == 3, let pid = Int32(fields[0]), pid > 0 else { continue }
+            labels[pid] = String(fields[2])
+        }
+        return labels
+    }
+
+    /// The job's own `properties = keepalive | runatload | …` line, one tab deep; nested blocks
+    /// such as endpoints carry their own properties lines.
+    static func launchctlPrintHasKeepAlive(_ output: String) -> Bool {
+        output.split(whereSeparator: \.isNewline).contains { line in
+            guard line.hasPrefix("\tproperties = ") else { return false }
+            return line.dropFirst("\tproperties = ".count).split(separator: "|")
+                .contains { $0.trimmingCharacters(in: .whitespaces) == "keepalive" }
+        }
     }
 
     private static func commandArguments(_ pids: [Int32]) -> [Int32: String] {
@@ -321,9 +435,14 @@ public enum Scanner {
         return result
     }
 
-    private static func applicationBundle(for process: ProcessFact, parents: [ProcessFact]) -> ApplicationBundle? {
-        if let path = process.executablePath, let bundle = bundlePath(path) {
-            return ApplicationBundle(name: bundle.name, path: bundle.path, sourcePID: process.pid, direct: true)
+    /// `launchedPath` is what `ps` reports. It matters when the mapped executable is a copy outside
+    /// the bundle, e.g. Chrome runs from `…/code_sign_clone/…/Google Chrome.app.bundle/…`.
+    private static func applicationBundle(for process: ProcessFact, parents: [ProcessFact],
+                                          launchedPath: String?) -> ApplicationBundle? {
+        for path in [process.executablePath, launchedPath].compactMap({ $0 }) {
+            if let bundle = bundlePath(path) {
+                return ApplicationBundle(name: bundle.name, path: bundle.path, sourcePID: process.pid, direct: true)
+            }
         }
         if let parent = parents.first, let path = parent.executablePath, let bundle = bundlePath(path) {
             return ApplicationBundle(name: bundle.name, path: bundle.path, sourcePID: parent.pid, direct: false)
@@ -347,18 +466,19 @@ public enum Scanner {
     private static func inferOwner(process: ProcessFact, project: ProjectMarker?, bundle: ApplicationBundle?) -> OwnerInference {
         if let project {
             return OwnerInference(label: project.name, category: .project, confidence: "high",
-                reason: "CWD is within a project root containing \(project.source) at \(project.markerPath).")
+                reason: L("CWD is within a project root containing \(project.source) at \(project.markerPath).",
+                          "工作目录位于项目根目录内，该目录包含 \(project.source)（\(project.markerPath)）。"))
         }
         if let bundle {
-            let reason = bundle.direct ? "The executable is inside \(bundle.path)." :
-                "Direct parent PID \(bundle.sourcePID) runs inside \(bundle.path)."
+            let reason = bundle.direct ? L("The executable is inside \(bundle.path).", "可执行文件位于 \(bundle.path) 内。") :
+                L("Direct parent PID \(bundle.sourcePID) runs inside \(bundle.path).", "直接父进程 PID \(bundle.sourcePID) 运行在 \(bundle.path) 内。")
             return OwnerInference(label: bundle.name, category: .application,
                 confidence: bundle.direct ? "high" : "medium", reason: reason)
         }
         if let path = process.executablePath, isSystemExecutable(path) {
             return OwnerInference(label: URL(fileURLWithPath: path).lastPathComponent,
                 category: .systemService, confidence: "high",
-                reason: "Executable path \(path) is in an operating-system-managed location.")
+                reason: L("Executable path \(path) is in an operating-system-managed location.", "可执行文件 \(path) 位于系统管理的目录中。"))
         }
         if let interpreter = inferInterpreterOwner(process: process) {
             return interpreter
@@ -370,10 +490,11 @@ public enum Scanner {
             let binaryName = URL(fileURLWithPath: path).lastPathComponent
             let humanLabel = formatBinaryName(binaryName)
             return OwnerInference(label: humanLabel, category: .service, confidence: "medium",
-                reason: "Executable \(path) is a user-installed binary.")
+                reason: L("Executable \(path) is a user-installed binary.", "可执行文件 \(path) 是用户自行安装的程序。"))
         }
-        return OwnerInference(label: "Unknown", category: .unknown, confidence: "none",
-            reason: "No accepted project marker, application bundle, or system executable path established an owner.")
+        return OwnerInference(label: L("Unknown", "未知"), category: .unknown, confidence: "none",
+            reason: L("No accepted project marker, application bundle, or system executable path established an owner.",
+                      "没有找到可确认归属的项目标记、App 或系统程序路径。"))
     }
 
     private static func inferInterpreterOwner(process: ProcessFact) -> OwnerInference? {
@@ -386,16 +507,16 @@ public enum Scanner {
             if let package = NodePackageLocator.locate(inArguments: args) {
                 let humanLabel = formatBinaryName(package.name)
                 return OwnerInference(label: humanLabel, category: .service, confidence: "high",
-                    reason: "Running npm package \(package.name) via \(process.command).")
+                    reason: L("Running npm package \(package.name) via \(process.command).", "通过 \(process.command) 运行 npm 包 \(package.name)。"))
             }
             if cmd.contains("python"), let module = extractPythonModule(from: args) {
                 let humanLabel = formatBinaryName(module)
                 return OwnerInference(label: humanLabel, category: .service, confidence: "high",
-                    reason: "Running Python module \(module).")
+                    reason: L("Running Python module \(module).", "正在运行 Python 模块 \(module)。"))
             }
             if let framework = extractCLIOrFramework(from: args) {
                 return OwnerInference(label: framework.label, category: .service, confidence: "high",
-                    reason: framework.reason)
+                    reason: L(framework.reason, "按启动参数识别为 \(framework.label)。"))
             }
         }
 
@@ -414,7 +535,8 @@ public enum Scanner {
                 if !toolDir.isEmpty && !notTools.contains(toolDir.lowercased()) {
                     let humanLabel = formatBinaryName(toolDir)
                     return OwnerInference(label: humanLabel, category: .service, confidence: "medium",
-                        reason: "Working directory is ~/.\(toolDir), the configuration directory of a tool by that name.")
+                        reason: L("Working directory is ~/.\(toolDir), the configuration directory of a tool by that name.",
+                                  "工作目录是 ~/.\(toolDir)，即同名工具的配置目录。"))
                 }
             }
         }
@@ -504,7 +626,8 @@ public enum Scanner {
         ]
 
         if let match = knownServices[binary] {
-            return OwnerInference(label: match.label, category: .service, confidence: "high", reason: match.reason)
+            return OwnerInference(label: match.label, category: .service, confidence: "high",
+                reason: L(match.reason, "按可执行文件名识别为已知服务：\(match.label)。"))
         }
         return nil
     }

@@ -23,9 +23,10 @@ func scopeLabel(_ scope: ListenerScope) -> String {
     scope == .local ? green("LOCAL") : yellow("LAN")
 }
 
-func printSection(_ title: String, activities: [Activity]) {
+func printSection(_ title: String, hint: String? = nil, activities: [Activity]) {
     guard !activities.isEmpty else { return }
     print("\n\(bold(title)) \(dim("(\(activities.count))"))")
+    if let hint { print(dim(hint)) }
     print(dim("\(pad("PORT", 8))\(pad("PID", 9))\(pad("OWNER", 24))\(pad("PROCESS", 16))\(pad("AGE", 8))\(pad("RAM", 9))SCOPE"))
     for activity in activities {
         let portStr = pad(activity.listener.port, 8)
@@ -51,16 +52,9 @@ func printOverview(activities: [Activity]) {
     print(bold("\nLEFT OPEN"))
     print("\(cyan(String(portCount))) listening ports · \(processCount) processes · \(projectCount) projects · \(yellow(String(lanCount))) LAN-visible")
 
-    let sections: [(OwnerCategory, String)] = [
-        (.project, "MY PROJECTS"),
-        (.application, "APPLICATIONS"),
-        (.service, "SERVICES"),
-        (.systemService, "SYSTEM SERVICES"),
-        (.unknown, "UNKNOWN"),
-    ]
-
-    for (cat, title) in sections {
-        printSection(title, activities: activities.filter { $0.inference.category == cat })
+    let categories = PortCategory.byPID(activities)
+    for category in PortCategory.allCases {
+        printSection(category.title.uppercased(), hint: category.hint, activities: activities.filter { categories[$0.process.pid] == category })
     }
     print(dim("\nLOCAL = this Mac only · LAN = may be reachable from your local network\n"))
 }

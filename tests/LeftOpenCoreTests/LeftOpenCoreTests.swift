@@ -195,6 +195,90 @@ final class LeftOpenCoreTests: XCTestCase {
             fixtureActivity(pid: 42, path: nil)))
     }
 
+    func testKeepAliveServicesAreRefusedWithAStopCommand() {
+        var brew = fixtureActivity(pid: 42, path: "/opt/homebrew/opt/syncthing/bin/syncthing")
+        brew.launchdJob = LaunchdJob(label: "homebrew.mxcl.syncthing", pid: 41, keepAlive: true)
+        XCTAssertTrue(CloseService.protectionReason(for: brew)?.contains("brew services stop syncthing") == true)
+
+        var agent = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/node")
+        agent.launchdJob = LaunchdJob(label: "com.example.gateway", pid: 42, keepAlive: true)
+        XCTAssertTrue(CloseService.protectionReason(for: agent)?
+            .contains("launchctl bootout gui/\(getuid())/com.example.gateway") == true)
+
+        // Without KeepAlive a SIGTERM sticks until the next login, so it stays closable.
+        var oneShot = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/node")
+        oneShot.launchdJob = LaunchdJob(label: "com.example.once", pid: 42, keepAlive: false)
+        XCTAssertNil(CloseService.protectionReason(for: oneShot))
+    }
+
+    func testPortCategoryFollowsWhoStartedTheProcess() {
+        let uid = Int32(getuid())
+        func category(path: String = "/opt/homebrew/bin/node", ppid: Int32? = 500, parents: [String] = [],
+                      appBundle: Bool = false, project: Bool = false, launchd: Bool = false,
+                      owner: Int32 = Int32(getuid())) -> PortCategory {
+            let base = fixtureActivity(pid: 42, path: path, uid: owner, appBundle: appBundle)
+            let process = ProcessFact(pid: 42, ppid: ppid, command: "node", executablePath: path,
+                uid: owner, user: nil, cwd: base.process.cwd)
+            let chain = parents.enumerated().map { index, name in
+                ProcessFact(pid: Int32(100 + index), ppid: nil, command: name, executablePath: nil, uid: uid, user: nil, cwd: nil)
+            }
+            var activity = Activity(listener: base.listener, process: process, parentChain: chain,
+                projectMarker: project ? ProjectMarker(name: "site", root: "/p", source: ".git", markerPath: "/p/.git") : nil,
+                applicationBundle: base.applicationBundle, scope: .local, inference: base.inference)
+            if launchd { activity.launchdJob = LaunchdJob(label: "homebrew.mxcl.postgresql", pid: 42, keepAlive: true) }
+            return PortCategory.classify([activity])
+        }
+
+        XCTAssertEqual(category(project: true), .devServer)
+        XCTAssertEqual(category(parents: ["-zsh", "login"]), .devServer)
+        XCTAssertEqual(category(parents: ["npm", "bash", "tmux"]), .devServer)
+        XCTAssertEqual(category(ppid: 1), .devServer, "orphaned after its terminal closed")
+        XCTAssertEqual(category(ppid: 1, launchd: true), .background)
+        XCTAssertEqual(category(parents: ["zsh"], launchd: true), .background)
+        XCTAssertEqual(category(parents: ["zsh"], appBundle: true), .app)
+        XCTAssertEqual(category(appBundle: true, project: true), .app, "an editor's own server follows the editor")
+        XCTAssertEqual(category(path: "/usr/libexec/rapportd", ppid: 1), .system)
+        XCTAssertEqual(category(ppid: 1, owner: uid + 1), .system)
+        XCTAssertEqual(category(parents: ["some-daemon"]), .other)
+    }
+
+    func testCoreTextFollowsTheSelectedLanguage() {
+        defer { Localization.current = .english }
+        XCTAssertEqual(PortCategory.devServer.title, "Dev Servers")
+
+        Localization.current = .chinese
+        XCTAssertEqual(PortCategory.devServer.title, "开发服务器")
+        var service = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/syncthing")
+        service.launchdJob = LaunchdJob(label: "homebrew.mxcl.syncthing", pid: 42, keepAlive: true)
+        XCTAssertEqual(CloseService.protectionReason(for: service),
+                       "launchd 会让 homebrew.mxcl.syncthing 保持运行，关闭后会立即重启。请用 `brew services stop syncthing` 停止它。")
+        // Callers branch on the flag, not on the wording, so the outcome is the same in any language.
+        XCTAssertTrue(CloseError("已发送", signalSent: true).signalSent)
+        XCTAssertFalse(CloseError("已拒绝").signalSent)
+    }
+
+    func testReleaseVersionComparesNumbersNotText() {
+        func v(_ text: String) -> ReleaseVersion { ReleaseVersion(text)! }
+        XCTAssertGreaterThan(v("v0.3.6"), v("0.3.5"))
+        XCTAssertGreaterThan(v("0.10.0"), v("0.9.9"))
+        XCTAssertEqual(v("1.2"), v("1.2.0"))
+        XCTAssertFalse(v("0.3.5") > v("v0.3.5"))
+        XCTAssertEqual(v("v0.3.5").description, "0.3.5")
+        XCTAssertNil(ReleaseVersion("1.0.0-beta"))
+        XCTAssertNil(ReleaseVersion(""))
+    }
+
+    func testLaunchctlParsing() {
+        let list = "PID\tStatus\tLabel\n34135\t0\thomebrew.mxcl.syncthing\n-\t0\tcom.apple.idle\n8490\t0\tapplication.com.google.Chrome.1.2\n"
+        XCTAssertEqual(Scanner.parseLaunchctlList(list),
+                       [34135: "homebrew.mxcl.syncthing", 8490: "application.com.google.Chrome.1.2"])
+
+        let keepAlive = "gui/501/x = {\n\tstate = running\n\tproperties = partial import | keepalive | runatload\n}"
+        let nestedOnly = "gui/501/x = {\n\tendpoints = {\n\t\tproperties = keepalive\n\t}\n\tproperties = runatload | inferred program\n}"
+        XCTAssertTrue(Scanner.launchctlPrintHasKeepAlive(keepAlive))
+        XCTAssertFalse(Scanner.launchctlPrintHasKeepAlive(nestedOnly))
+    }
+
     func testNodePackageLocatorSkipsIndirectionAndPrefersInnermostPackage() {
         let global = NodePackageLocator.locate(inArguments: "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/openclaw/dist/index.js gateway --port 18789")
         XCTAssertEqual(global?.name, "openclaw")
@@ -300,6 +384,24 @@ final class LeftOpenCoreTests: XCTestCase {
         // protectedAct should be skipped
         XCTAssertEqual(plans.count, 2)
         XCTAssertEqual(Set(plans.map(\.pid)), Set(processes.map(\.processIdentifier)))
+    }
+
+    func testCommandRunnerReturnsOutput() throws {
+        XCTAssertEqual(try CommandRunner.output("/bin/echo", ["hello"]), "hello\n")
+    }
+
+    func testCommandRunnerStopsHungCommandAtDeadline() {
+        let started = Date()
+        XCTAssertThrowsError(try CommandRunner.output("/bin/sleep", ["30"], timeout: 0.3)) { error in
+            guard case ScanError.timedOut = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+    }
+
+    func testCommandRunnerStopsRunawayOutput() {
+        XCTAssertThrowsError(try CommandRunner.output("/usr/bin/yes", [], maxOutputBytes: 64 * 1024)) { error in
+            guard case ScanError.outputTooLarge = error else { return XCTFail("Unexpected error: \(error)") }
+        }
     }
 
     private func fixtureActivity(pid: Int32, path: String?, port: Int = 3000,

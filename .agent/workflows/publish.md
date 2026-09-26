@@ -21,7 +21,7 @@ export LEFTOPEN_OUTPUT_DIR="dist/v${NEW_VERSION}"
 # 2. Pre-flight tests
 swift test
 
-# 3. Bump version in Info.plist, main.swift, package.json, src/cli.ts
+# 3. Bump version in Info.plist and main.swift
 # Keep README.md, README.zh-CN.md, and docs/index.html requirements current.
 
 # 4. Compile and package universal app and CLI (arm64 + x86_64, macOS 14+)

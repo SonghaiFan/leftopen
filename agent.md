@@ -78,13 +78,7 @@ Update version strings across project files:
      }
      ```
 
-3. **`package.json`**:
-   - Update `"version"` field to `"${NEW_VERSION}"`.
-
-4. **`src/cli.ts`**:
-   - Update version string to `"${NEW_VERSION}"`.
-
-5. **`README.md`, `README.zh-CN.md`, and `docs/index.html`**:
+3. **`README.md`, `README.zh-CN.md`, and `docs/index.html`**:
    - Keep installation requirements current. The manual download links use GitHub's latest release, so they do not require a version bump.
 
 ---
@@ -152,7 +146,7 @@ echo "SHA256: $SHA256_HASH"
 Commit all version updates, tag the commit, and push to GitHub:
 
 ```bash
-git add Package.swift README.md Resources/Info.plist Scripts/ docs/ package.json src/ Sources/
+git add Package.swift README.md Resources/Info.plist Scripts/ docs/ Sources/
 git commit -m "Release v${NEW_VERSION}: bump version and release build"
 git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
 git push origin main

@@ -23,7 +23,7 @@ enum PanelSnapshot {
 
             // ImageRenderer only draws pure SwiftUI (AppKit-backed controls become placeholders),
             // so host the panel in an invisible window and let AppKit rasterise it at 2x.
-            let content = MenuPanel(model: model, protectedExpanded: true)
+            let content = MenuPanel(model: model, expandAllSections: true)
                 .frame(width: 375, height: 460)
                 .environment(\.colorScheme, dark ? .dark : .light)
             let hosting = NSHostingView(rootView: content)

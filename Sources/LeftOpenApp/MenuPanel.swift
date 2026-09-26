@@ -5,6 +5,7 @@ import SwiftUI
 struct MenuPanel: View {
     @ObservedObject var model: MenuModel
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var updates = UpdateChecker.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
@@ -15,12 +16,14 @@ struct MenuPanel: View {
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
     @State private var webURLs: [String: URL] = [:]
-    @State private var protectedExpanded: Bool
+    /// Sections the user folded or unfolded; the rest follow `defaultExpanded(_:)`.
+    @State private var sectionExpansion: [PortCategory: Bool] = [:]
+    private let expandAllSections: Bool
     @FocusState private var searchFocused: Bool
 
-    init(model: MenuModel, protectedExpanded: Bool = false) {
+    init(model: MenuModel, expandAllSections: Bool = false) {
         self.model = model
-        _protectedExpanded = State(initialValue: protectedExpanded)
+        self.expandAllSections = expandAllSections
     }
 
     // MARK: - Data
@@ -74,23 +77,24 @@ struct MenuPanel: View {
         }
     }
 
-    // Closable listeners come first (they are what you opened the panel for); apps and
-    // system services LeftOpen refuses to touch are folded into a collapsed section.
-    private var closableActivities: [Activity] {
-        filteredActivities.filter { CloseService.protectionReason(for: $0) == nil }
+    /// One section per category, in `PortCategory` order, so the name says what the ports are
+    /// for. Categories are judged on the full scan, so a search never moves a process between
+    /// sections; within a section, closable processes come first.
+    private var sections: [(category: PortCategory, groups: [ListenerGroup])] {
+        let categories = PortCategory.byPID(model.snapshot.activities)
+        let groups = listenerGroups(from: filteredActivities)
+        return PortCategory.allCases.compactMap { category in
+            let members = groups.filter { (categories[$0.primary.process.pid] ?? .other) == category }
+            let ordered = members.filter { $0.closeTarget != nil } + members.filter { $0.closeTarget == nil }
+            return ordered.isEmpty ? nil : (category, ordered)
+        }
     }
 
-    private var protectedActivities: [Activity] {
-        filteredActivities.filter { CloseService.protectionReason(for: $0) != nil }
+    /// Sections with something to close start open; ones LeftOpen can only explain start folded.
+    private func isExpanded(_ category: PortCategory, _ groups: [ListenerGroup]) -> Bool {
+        if expandAllSections || !query.isEmpty { return true }
+        return sectionExpansion[category] ?? groups.contains { $0.closeTarget != nil }
     }
-
-    private var projectGroups: [ListenerGroup] {
-        listenerGroups(from: closableActivities.filter { $0.inference.category == .project })
-    }
-    private var serviceGroups: [ListenerGroup] {
-        listenerGroups(from: closableActivities.filter { $0.inference.category != .project })
-    }
-    private var protectedGroups: [ListenerGroup] { listenerGroups(from: protectedActivities) }
 
     private func listenerGroups(from activities: [Activity]) -> [ListenerGroup] {
         var groups: [String: [Activity]] = [:]
@@ -248,8 +252,8 @@ struct MenuPanel: View {
                 .quietFocus()
                 .keyboardShortcut(.cancelAction)
                 .disabled(model.isClosing)
-                .help("Back (Esc)")
-                .accessibilityLabel("Back")
+                .help(L("Back (Esc)", "返回 (Esc)"))
+                .accessibilityLabel(L("Back", "返回"))
                 .transition(.move(edge: .leading).combined(with: .opacity))
             }
             DoorMark(isOpen: model.hasOpenDoors)
@@ -277,8 +281,8 @@ struct MenuPanel: View {
             .quietFocus()
             .keyboardShortcut("r", modifiers: .command)
             .disabled(model.isRefreshing || model.isClosing)
-            .help("Refresh (⌘R)")
-            .accessibilityLabel("Refresh listening ports")
+            .help(L("Refresh (⌘R)", "刷新 (⌘R)"))
+            .accessibilityLabel(L("Refresh listening ports", "刷新监听端口"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -287,17 +291,18 @@ struct MenuPanel: View {
     private var statusLine: some View {
         HStack(spacing: 4) {
             if model.hasOpenDoors {
-                Text("\(model.closablePortCount) open").fontWeight(.medium)
+                Text(L("\(model.closablePortCount) open", "\(model.closablePortCount) 个可关闭")).fontWeight(.medium)
             } else {
-                Text("All doors closed")
+                Text(L("All doors closed", "门都关好了"))
             }
             Text("·")
-            Text("\(model.portCount) listening")
+            Text(L("\(model.portCount) listening", "\(model.portCount) 个监听"))
             if model.lanPortCount > 0 {
                 Text("·")
-                Text("\(model.lanPortCount) LAN")
+                Text(L("\(model.lanPortCount) LAN", "\(model.lanPortCount) 个局域网可见"))
                     .foregroundStyle(Color(nsColor: .systemOrange))
-                    .help("LAN-facing means a non-loopback or wildcard bind. Localhost may still work; other devices need this Mac's LAN address and firewall access.")
+                    .help(L("LAN-facing means a non-loopback or wildcard bind. Localhost may still work; other devices need this Mac's LAN address and firewall access.",
+                            "局域网可见指绑定在非回环地址或通配地址上。本机访问通常没问题；其他设备需要通过这台 Mac 的局域网地址访问，并且要被防火墙放行。"))
             }
         }
         .font(.caption)
@@ -323,15 +328,25 @@ struct MenuPanel: View {
 
     private var footer: some View {
         HStack(spacing: 14) {
-            Text(model.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not yet scanned")
+            if let release = updates.availableRelease {
+                Button {
+                    SettingsWindowController.shared.show()
+                } label: {
+                    Label(L("\(release.version) available", "\(release.version) 可更新"), systemImage: "arrow.down.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                }
+                .help(L("LeftOpen \(release.version) is available. Open Settings to update.",
+                        "LeftOpen \(release.version) 已发布，打开设置查看如何更新。"))
+            }
+            Text(model.lastRefresh.map { L("Updated \($0.formatted(date: .omitted, time: .shortened))", "更新于 \($0.formatted(date: .omitted, time: .shortened))") } ?? L("Not yet scanned", "尚未扫描"))
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Settings…") { SettingsWindowController.shared.show() }
+            Button(L("Settings…", "设置…")) { SettingsWindowController.shared.show() }
                 .keyboardShortcut(",", modifiers: .command)
-                .help("Settings (⌘,)")
-            Button("Quit") { NSApp.terminate(nil) }
+                .help(L("Settings (⌘,)", "设置 (⌘,)"))
+            Button(L("Quit", "退出")) { NSApp.terminate(nil) }
                 .keyboardShortcut("q", modifiers: .command)
-                .help("Quit LeftOpen (⌘Q)")
+                .help(L("Quit LeftOpen (⌘Q)", "退出 LeftOpen (⌘Q)"))
         }
         .buttonStyle(QuietButtonStyle())
         .quietFocus()
@@ -346,7 +361,7 @@ struct MenuPanel: View {
         VStack(spacing: 0) {
             searchField
             if model.isRefreshing && model.snapshot.activities.isEmpty {
-                ProgressView("Scanning this Mac…")
+                ProgressView(L("Scanning this Mac…", "正在扫描这台 Mac…"))
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if filteredActivities.isEmpty {
@@ -354,10 +369,11 @@ struct MenuPanel: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        if !projectGroups.isEmpty {
-                            sectionHeader("Projects") {
-                                if model.visible.closableProjectActivities.count >= 2 {
-                                    Button("Close All…") {
+                        ForEach(sections, id: \.category) { section in
+                            let expanded = isExpanded(section.category, section.groups)
+                            categoryHeader(section.category, count: section.groups.count, expanded: expanded) {
+                                if section.category == .devServer && model.visible.closableProjectActivities.count >= 2 {
+                                    Button(L("Close All…", "全部关闭…")) {
                                         Task { await model.previewBatchCloseProjects() }
                                     }
                                     .buttonStyle(.plain)
@@ -365,23 +381,15 @@ struct MenuPanel: View {
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(Color(nsColor: .systemRed))
                                     .disabled(model.isPreparingBatchClose || model.isClosing)
-                                    .help("Review closing all \(model.visible.closableProjectPortCount) project ports")
+                                    .help(L("Review closing all \(model.visible.closableProjectPortCount) project ports", "确认关闭全部 \(model.visible.closableProjectPortCount) 个项目端口"))
                                 }
                             }
-                            groupRows(projectGroups)
-                        }
-                        if !serviceGroups.isEmpty {
-                            sectionHeader("Other Processes") { EmptyView() }
-                            groupRows(serviceGroups)
-                        }
-                        if !protectedGroups.isEmpty {
-                            protectedHeader
-                            if protectedExpanded || !query.isEmpty {
-                                groupRows(protectedGroups)
+                            if expanded {
+                                groupRows(section.groups)
                             }
                         }
                         if !model.snapshot.limitations.isEmpty {
-                            DisclosureGroup("Scan limitations", isExpanded: $limitationsExpanded) {
+                            DisclosureGroup(L("Scan limitations", "扫描限制"), isExpanded: $limitationsExpanded) {
                                 ForEach(model.snapshot.limitations, id: \.self) { limitation in
                                     Text(limitation)
                                         .foregroundStyle(.secondary)
@@ -403,13 +411,13 @@ struct MenuPanel: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search port, process, or PID", text: $query)
+            TextField(L("Search port, process, or PID", "搜索端口、进程或 PID"), text: $query)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .onAppear {
                     DispatchQueue.main.async { searchFocused = true }
                 }
-                .accessibilityLabel("Search listening ports")
+                .accessibilityLabel(L("Search listening ports", "搜索监听端口"))
             if !query.isEmpty {
                 Button {
                     query = ""
@@ -418,7 +426,7 @@ struct MenuPanel: View {
                 }
                 .buttonStyle(QuietButtonStyle())
                 .quietFocus()
-                .accessibilityLabel("Clear search")
+                .accessibilityLabel(L("Clear search", "清除搜索"))
             }
         }
         .font(.callout)
@@ -442,29 +450,38 @@ struct MenuPanel: View {
         .padding(.bottom, 4)
     }
 
-    /// Apps and system services: not closable, so hidden behind a disclosure unless the
-    /// user is searching (a search that only matches protected ports must still show them).
-    private var protectedHeader: some View {
-        let expanded = protectedExpanded || !query.isEmpty
-        return Button {
-            withAnimation(motion) { protectedExpanded.toggle() }
-        } label: {
-            sectionHeader("Not Closable") {
-                Text(String(protectedGroups.count))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(expanded ? 90 : 0))
+    /// A foldable section title. Hovering it explains where these ports come from and how to
+    /// close them; folding is disabled while searching so matches are never hidden.
+    private func categoryHeader<Accessory: View>(_ category: PortCategory, count: Int, expanded: Bool,
+                                                 @ViewBuilder accessory: () -> Accessory) -> some View {
+        let foldable = query.isEmpty && !expandAllSections
+        return HStack(spacing: 0) {
+            Button {
+                guard foldable else { return }
+                withAnimation(motion) { sectionExpansion[category] = !expanded }
+            } label: {
+                sectionHeader(category.title) {
+                    Text(String(count))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    if foldable {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                    }
+                }
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .quietFocus()
+            .help(category.hint)
+            .accessibilityLabel("\(category.title), \(count)")
+            .accessibilityHint(foldable ? (expanded ? L("Collapses the section", "收起此分组") : L("Expands the section", "展开此分组")) : category.hint)
+            accessory()
+                .padding(.trailing, 14)
+                .padding(.top, 6)
         }
-        .buttonStyle(.plain)
-        .quietFocus()
-        .disabled(!query.isEmpty)
-        .accessibilityLabel("\(protectedGroups.count) not closable apps and system services")
-        .accessibilityHint(expanded ? "Collapses the list" : "Expands the list")
     }
 
     private func groupRows(_ groups: [ListenerGroup]) -> some View {
@@ -528,7 +545,7 @@ struct MenuPanel: View {
             port: activity.listener.port,
             icon: nil,
             title: activity.listener.addresses.joined(separator: ", "),
-            subtitle: activity.scope == .lan ? "LAN-facing" : "Local only",
+            subtitle: activity.scope == .lan ? L("LAN-facing", "局域网可见") : L("Local only", "仅本机"),
             isLAN: activity.scope == .lan,
             onSelect: { showDetails(activity) },
             onClose: closeTarget.map { target in { closeNow(target) } }
@@ -545,15 +562,15 @@ struct MenuPanel: View {
                 .font(.title2)
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 4)
-            Text(scanUnavailable ? "Unable to scan" : nothingListening ? "Nothing left open" : "No matching ports")
+            Text(scanUnavailable ? L("Unable to scan", "无法扫描") : nothingListening ? L("Nothing left open", "没有虚掩的门") : L("No matching ports", "没有匹配的端口"))
                 .font(.headline)
-            Text(scanUnavailable ? "Check the message above, then refresh."
-                : nothingListening ? "No TCP listeners on this Mac." : "Try a port number, process name, or PID.")
+            Text(scanUnavailable ? L("Check the message above, then refresh.", "请查看上方提示，然后刷新。")
+                : nothingListening ? L("No TCP listeners on this Mac.", "这台 Mac 上没有 TCP 监听。") : L("Try a port number, process name, or PID.", "试试端口号、进程名或 PID。"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if !query.isEmpty {
-                Button("Clear Search") { query = "" }
+                Button(L("Clear Search", "清除搜索")) { query = "" }
                     .controlSize(.small)
                     .padding(.top, 6)
             }
@@ -574,7 +591,7 @@ struct MenuPanel: View {
                 HStack(spacing: 12) {
                     ProcessIconView(activity: activity, size: 36)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Port \(String(port))")
+                        Text(L("Port \(String(port))", "端口 \(String(port))"))
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))
                         Text(activity.inference.label)
                             .font(.callout)
@@ -590,34 +607,34 @@ struct MenuPanel: View {
                             Button {
                                 NSWorkspace.shared.open(webURL)
                             } label: {
-                                Label("Open", systemImage: "safari")
+                                Label(L("Open", "打开"), systemImage: "safari")
                             }
                             .keyboardShortcut("o", modifiers: .command)
-                            .help("Open verified web endpoint: \(webURL.absoluteString) (⌘O)")
+                            .help(L("Open verified web endpoint: \(webURL.absoluteString) (⌘O)", "打开已验证的网页地址：\(webURL.absoluteString) (⌘O)"))
                             Button {
                                 copy(webURL.absoluteString)
                             } label: {
-                                Label("Copy URL", systemImage: "link")
+                                Label(L("Copy URL", "复制网址"), systemImage: "link")
                             }
-                            .help("Copy verified URL: \(webURL.absoluteString)")
+                            .help(L("Copy verified URL: \(webURL.absoluteString)", "复制已验证的网址：\(webURL.absoluteString)"))
                         }
                         if let folder {
                             Button {
                                 reveal(folder)
                             } label: {
-                                Label("Reveal", systemImage: "folder")
+                                Label(L("Reveal", "显示"), systemImage: "folder")
                             }
-                            .help("Reveal \(compactPath(folder)) in Finder")
+                            .help(L("Reveal \(compactPath(folder)) in Finder", "在访达中显示 \(compactPath(folder))"))
                         }
                         Spacer(minLength: 0)
                         if protection == nil {
                             Button {
                                 close(activity)
                             } label: {
-                                Text("Close…").foregroundStyle(Color(nsColor: .systemRed))
+                                Text(L("Close…", "关闭…")).foregroundStyle(Color(nsColor: .systemRed))
                             }
                             .disabled(model.isPreparingClose || model.isClosing)
-                            .help("Review closing PID \(String(activity.process.pid))")
+                            .help(L("Review closing PID \(String(activity.process.pid))", "确认关闭 PID \(String(activity.process.pid))"))
                         }
                     }
                     .buttonStyle(.bordered)
@@ -629,7 +646,7 @@ struct MenuPanel: View {
                         Image(systemName: "lock.fill")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Can't be closed from LeftOpen")
+                            Text(L("Can't be closed from LeftOpen", "无法在 LeftOpen 中关闭"))
                                 .font(.callout.weight(.medium))
                             Text(protection)
                                 .font(.caption)
@@ -644,37 +661,37 @@ struct MenuPanel: View {
 
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
-                    infoRow("Command", activity.process.command)
+                    infoRow(L("Command", "命令"), activity.process.command)
                     infoRow("PID", String(activity.process.pid))
                     if let uptime = activity.process.uptime {
-                        infoRow("Uptime", uptime)
+                        infoRow(L("Uptime", "运行时长"), uptime)
                     }
                     if let memory = activity.process.memoryUsage {
-                        infoRow("Memory", memory)
+                        infoRow(L("Memory", "内存"), memory)
                     }
-                    infoRow("Executable", compactPath(activity.process.executablePath))
-                    infoRow("Folder", compactPath(activity.process.cwd))
-                    infoRow("Addresses", activity.listener.addresses.joined(separator: ", "))
+                    infoRow(L("Executable", "可执行文件"), compactPath(activity.process.executablePath))
+                    infoRow(L("Folder", "目录"), compactPath(activity.process.cwd))
+                    infoRow(L("Addresses", "地址"), activity.listener.addresses.joined(separator: ", "))
                     if let webURL {
-                        infoRow("Web URL", webURL.absoluteString)
+                        infoRow(L("Web URL", "网址"), webURL.absoluteString)
                     }
                 }
 
                 Divider()
-                DisclosureGroup("Owner evidence", isExpanded: $evidenceExpanded) {
+                DisclosureGroup(L("Owner evidence", "归属证据"), isExpanded: $evidenceExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        infoRow("Type", activity.inference.category.accessibleName.capitalized)
-                        infoRow("User", activity.process.user ?? activity.process.uid.map(String.init) ?? "Unknown")
+                        infoRow(L("Type", "类型"), activity.inference.category.accessibleName.capitalized)
+                        infoRow(L("User", "用户"), activity.process.user ?? activity.process.uid.map(String.init) ?? L("Unknown", "未知"))
                         if let project = activity.projectMarker {
-                            infoRow("Marker", compactPath(project.markerPath))
+                            infoRow(L("Marker", "项目标记"), compactPath(project.markerPath))
                         }
                         if let bundle = activity.applicationBundle {
-                            infoRow("Application", compactPath(bundle.path))
+                            infoRow(L("Application", "App"), compactPath(bundle.path))
                         }
                         if !activity.parentChain.isEmpty {
-                            infoRow("Parents", activity.parentChain.map { "\($0.command) (\(String($0.pid)))" }.joined(separator: " → "))
+                            infoRow(L("Parents", "父进程"), activity.parentChain.map { "\($0.command) (\(String($0.pid)))" }.joined(separator: " → "))
                         }
-                        infoRow("Confidence", activity.inference.confidence)
+                        infoRow(L("Confidence", "可信度"), confidenceText(activity.inference.confidence))
                         Text(activity.inference.reason)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -694,11 +711,11 @@ struct MenuPanel: View {
                 .font(.title2)
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 4)
-            Text("No longer listening").font(.headline)
-            Text("It went away during the last refresh.")
+            Text(L("No longer listening", "已不再监听")).font(.headline)
+            Text(L("It went away during the last refresh.", "它在上次刷新时已经退出。"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Button("Back", action: goBack)
+            Button(L("Back", "返回"), action: goBack)
                 .controlSize(.small)
                 .padding(.top, 6)
         }
@@ -712,26 +729,28 @@ struct MenuPanel: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Close port \(String(plan.port))?")
+                    Text(L("Close port \(String(plan.port))?", "关闭端口 \(String(plan.port))？"))
                         .font(.title3.weight(.semibold))
-                    Text("LeftOpen sends SIGTERM to PID \(String(plan.pid)) only. Nothing is force-quit, and child processes are not signalled.")
+                    Text(L("LeftOpen sends SIGTERM to PID \(String(plan.pid)) only. Nothing is force-quit, and child processes are not signalled.",
+                            "LeftOpen 只向 PID \(String(plan.pid)) 发送 SIGTERM，不会强制退出，也不会向子进程发送信号。"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Divider()
-                    infoRow("Process", plan.activity.process.command)
-                    infoRow("Executable", compactPath(plan.executablePath))
-                    infoRow("Started", plan.startTime)
+                    infoRow(L("Process", "进程"), plan.activity.process.command)
+                    infoRow(L("Executable", "可执行文件"), compactPath(plan.executablePath))
+                    infoRow(L("Started", "启动时间"), plan.startTime)
                     if !plan.otherPorts.isEmpty {
-                        caution("It also listens on \(plan.otherPorts.map(String.init).joined(separator: ", ")); those ports will close too.")
+                        caution(L("It also listens on \(plan.otherPorts.map(String.init).joined(separator: ", ")); those ports will close too.",
+                                   "它还在监听 \(plan.otherPorts.map(String.init).joined(separator: ", "))，这些端口也会一起关闭。"))
                     }
                     if !plan.peerPIDs.isEmpty {
-                        caution("Other processes share this port. Only PID \(String(plan.pid)) is signalled.")
+                        caution(L("Other processes share this port. Only PID \(String(plan.pid)) is signalled.", "还有其他进程共用这个端口，只会向 PID \(String(plan.pid)) 发送信号。"))
                     }
                 }
                 .padding(14)
             }
-            confirmBar(plan.otherPorts.isEmpty ? "Close Port" : "Close Ports") {
+            confirmBar(plan.otherPorts.isEmpty ? L("Close Port", "关闭端口") : L("Close Ports", "关闭这些端口")) {
                 Task { await model.confirmClose() }
             }
         }
@@ -742,9 +761,9 @@ struct MenuPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Close \(plans.count) project server\(plans.count == 1 ? "" : "s")?")
+                        Text(L("Close \(plans.count) project server\(plans.count == 1 ? "" : "s")?", "关闭 \(plans.count) 个项目服务器？"))
                             .font(.title3.weight(.semibold))
-                        Text("LeftOpen sends SIGTERM to each process below. Apps and system services are not touched.")
+                        Text(L("LeftOpen sends SIGTERM to each process below. Apps and system services are not touched.", "LeftOpen 会向下面每个进程发送 SIGTERM，不会影响 App 和系统服务。"))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -763,7 +782,7 @@ struct MenuPanel: View {
                     }
                 }
             }
-            confirmBar("Close All") {
+            confirmBar(L("Close All", "全部关闭")) {
                 Task { await model.confirmBatchClose() }
             }
         }
@@ -775,12 +794,12 @@ struct MenuPanel: View {
         HStack(spacing: 8) {
             if model.isClosing {
                 ProgressView().controlSize(.small)
-                Text("Closing…")
+                Text(L("Closing…", "正在关闭…"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Cancel", action: goBack)
+            Button(L("Cancel", "取消"), action: goBack)
                 .disabled(model.isClosing)
             Button(title, role: .destructive, action: action)
                 .buttonStyle(.borderedProminent)
@@ -801,6 +820,15 @@ struct MenuPanel: View {
                 .foregroundStyle(Color(nsColor: .systemOrange))
         }
         .font(.callout)
+    }
+
+    private func confidenceText(_ confidence: String) -> String {
+        switch confidence {
+        case "high": L("High", "高")
+        case "medium": L("Medium", "中")
+        case "none": L("None", "无")
+        default: confidence
+        }
     }
 
     private func infoRow(_ title: String, _ value: String) -> some View {
@@ -826,27 +854,27 @@ struct MenuPanel: View {
             browserURL(for: activity).map { WebTarget(activity: activity, url: $0) }
         }
         if webTargets.count == 1, let target = webTargets.first {
-            Button("Open in Browser") { NSWorkspace.shared.open(target.url) }
-            Button("Copy URL") { copy(target.url.absoluteString) }
+            Button(L("Open in Browser", "在浏览器中打开")) { NSWorkspace.shared.open(target.url) }
+            Button(L("Copy URL", "复制网址")) { copy(target.url.absoluteString) }
         } else if webTargets.count > 1 {
-            Menu("Open in Browser") {
+            Menu(L("Open in Browser", "在浏览器中打开")) {
                 ForEach(webTargets) { target in
                     Button(String(target.activity.listener.port)) { NSWorkspace.shared.open(target.url) }
                 }
             }
-            Menu("Copy URL") {
+            Menu(L("Copy URL", "复制网址")) {
                 ForEach(webTargets) { target in
                     Button(String(target.activity.listener.port)) { copy(target.url.absoluteString) }
                 }
             }
         }
-        Button(ports.count == 1 ? "Copy Port" : "Copy Ports") {
+        Button(ports.count == 1 ? L("Copy Port", "复制端口") : L("Copy Ports", "复制端口")) {
             copy(ports.map(String.init).joined(separator: ", "))
         }
-        Button("Copy PID") { copy(String(primary.process.pid)) }
+        Button(L("Copy PID", "复制 PID")) { copy(String(primary.process.pid)) }
         if let folder = revealTarget(for: primary) {
             Divider()
-            Button("Reveal in Finder") { reveal(folder) }
+            Button(L("Reveal in Finder", "在访达中显示")) { reveal(folder) }
         }
         let closable = activities
             .filter { CloseService.protectionReason(for: $0) == nil }
@@ -854,7 +882,7 @@ struct MenuPanel: View {
         if !closable.isEmpty {
             Divider()
             ForEach(closable) { activity in
-                Button("Close Port \(String(activity.listener.port))…") { close(activity) }
+                Button(L("Close Port \(String(activity.listener.port))…", "关闭端口 \(String(activity.listener.port))…")) { close(activity) }
             }
         }
     }
@@ -909,7 +937,7 @@ private struct ListenerGroup: Identifiable {
     }
 
     var subtitle: String {
-        if pids.count > 1 { return "\(pids.count) processes" }
+        if pids.count > 1 { return L("\(pids.count) processes", "\(pids.count) 个进程") }
         let pid = "PID \(primary.process.pid)"
         return primary.inference.label == primary.process.command ? pid : "\(primary.process.command) · \(pid)"
     }
@@ -962,7 +990,7 @@ private struct PortRow: View {
             .onHover { hovering in
                 withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
             }
-            .accessibilityHint(disclosure == true ? "Collapse ports" : "Expand ports")
+            .accessibilityHint(disclosure == true ? L("Collapse ports", "收起端口") : L("Expand ports", "展开端口"))
         } else {
             swipableRow
         }
@@ -993,7 +1021,7 @@ private struct PortRow: View {
             .accessibilityAction { onSelect?() }
             .accessibilityActions {
                 if let onClose {
-                    Button("Close Port \(port.map(String.init) ?? "")", action: onClose)
+                    Button(L("Close Port \(port.map(String.init) ?? "")", "关闭端口 \(port.map(String.init) ?? "")"), action: onClose)
                 }
             }
     }
@@ -1097,7 +1125,7 @@ private struct PortRow: View {
                     .font(.system(size: reveal < 30 ? 10 : 13, weight: .semibold))
                     .scaleEffect(armed ? 1.15 : 1)
                 if reveal > 78 {
-                    Text(action == .details ? "Details" : "Close")
+                    Text(action == .details ? L("Details", "详情") : L("Close", "关闭"))
                         .font(.system(size: 11, weight: .semibold))
                         .transition(.opacity)
                 }
@@ -1268,7 +1296,7 @@ private struct LANBadge: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(Color(nsColor: .systemOrange).opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .help("Bound beyond loopback. Localhost may still work, but access from another device is not verified.")
+            .help(L("Bound beyond loopback. Localhost may still work, but access from another device is not verified.", "绑定在回环地址之外。本机访问通常没问题，但其他设备能否访问未经验证。"))
     }
 }
 
@@ -1302,11 +1330,11 @@ private extension View {
 private extension OwnerCategory {
     var accessibleName: String {
         switch self {
-        case .project: "project"
-        case .application: "application"
-        case .service: "service"
-        case .systemService: "system service"
-        case .unknown: "unknown owner"
+        case .project: L("project", "项目")
+        case .application: L("application", "App")
+        case .service: L("service", "服务")
+        case .systemService: L("system service", "系统服务")
+        case .unknown: L("unknown owner", "未知归属")
         }
     }
 }
@@ -1318,14 +1346,15 @@ private struct ScopeLabel: View {
         HStack(spacing: 5) {
             Image(systemName: scope == .lan ? "wifi" : "desktopcomputer")
                 .foregroundStyle(scope == .lan ? Color(nsColor: .systemOrange) : Color.secondary)
-            Text(scope == .lan ? "LAN-facing" : "Local only")
+            Text(scope == .lan ? L("LAN-facing", "局域网可见") : L("Local only", "仅本机"))
                 .foregroundStyle(.secondary)
         }
         .font(.caption)
         .accessibilityElement(children: .combine)
         .help(scope == .lan
-            ? "Non-loopback or wildcard bind observed. Localhost may still work; LAN reachability depends on the actual address and firewall."
-            : "Only loopback bind addresses were observed.")
+            ? L("Non-loopback or wildcard bind observed. Localhost may still work; LAN reachability depends on the actual address and firewall.",
+                "绑定在非回环地址或通配地址上。本机访问通常没问题；局域网能否访问取决于具体地址和防火墙。")
+            : L("Only loopback bind addresses were observed.", "只绑定在回环地址上。"))
     }
 }
 
@@ -1504,7 +1533,7 @@ enum MenuBarDoor {
         renderer.scale = 2
         let image = renderer.nsImage ?? NSImage()
         image.isTemplate = true
-        image.accessibilityDescription = isOpen ? "Doors open" : "All doors closed"
+        image.accessibilityDescription = isOpen ? L("Doors open", "有门开着") : L("All doors closed", "门都关好了")
         return image
     }
 }

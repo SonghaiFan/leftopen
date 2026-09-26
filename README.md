@@ -53,10 +53,10 @@ Get `LeftOpen.zip` from [GitHub Releases](https://github.com/SonghaiFan/leftopen
 
 - **Knows whose port it is.** Walks up from the process's working directory to `.git`, `package.json`, `pyproject.toml`, `Cargo.toml` or `go.mod`, or resolves the owning `.app`. Global npm packages, `python -m` modules and standalone services (Redis, Postgres, Ollama…) are named too, so you rarely see a bare `node` or `python`.
 - **Real icons, nothing bundled.** Uses the `.app` icon when there is one; otherwise the icon the project or package ships itself (Tauri/Electron app icon, the favicon declared in `index.html`, `public/` conventions); otherwise the favicon served by the local server; otherwise a symbol.
-- **Closable first.** Ports you can close come first; apps and system services are folded away. The menu bar icon is an open or closed door, and every row shows how long the process has been running.
+- **Grouped by who started them.** Dev Servers (from a project, terminal, editor or agent), Background Services (launchd: brew services, login items), Apps and System. The group is also how a port is closed for good, and each one says so: SIGTERM for dev servers, `brew services stop …` for services launchd would restart, quitting the app for apps.
 - **Closes gently.** Shows the process's other ports before you confirm, re-checks PID and start time at the moment of closing, sends `SIGTERM` only. Never `SIGKILL`, never system processes.
 - **Local vs LAN.** Tells apart ports bound to `127.0.0.1` from ones on `0.0.0.0` or a LAN address.
-- **Nothing running in the background.** Native SwiftUI `MenuBarExtra`. No daemon, no Dock icon, no telemetry.
+- **Nothing running in the background.** Native SwiftUI `MenuBarExtra`. No daemon, no Dock icon, no telemetry. The only request that leaves this Mac is a daily check of the latest GitHub release, which you can turn off in Settings.
 - **Same engine in the terminal.** The app ships a `leftopen` CLI with identical inference and safety rules.
 
 ---
@@ -111,11 +111,8 @@ LOCAL = this Mac only · LAN = may be reachable from your local network
 ## Development
 
 ```bash
-# Swift tests
+# Tests
 swift test
-
-# CLI prototype tests
-npm test
 
 # Build the app locally
 LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh

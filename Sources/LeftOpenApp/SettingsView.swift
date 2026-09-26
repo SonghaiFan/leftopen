@@ -1,33 +1,36 @@
 import AppKit
+import LeftOpenCore
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var launchAtLogin = LaunchAtLoginManager.shared
+    @ObservedObject private var updates = UpdateChecker.shared
     @State private var newPort = ""
     @State private var didCopy = false
     @State private var doorOpen = true
 
-    private static let brewCommand = "brew install --cask songhaifan/tap/leftopen"
-
     private var version: String {
         let info = Bundle.main.infoDictionary
-        guard let short = info?["CFBundleShortVersionString"] as? String else { return "Development build" }
+        guard let short = info?["CFBundleShortVersionString"] as? String else { return L("Development build", "开发版本") }
         let build = info?["CFBundleVersion"] as? String
-        return build.map { "Version \(short) (\($0))" } ?? "Version \(short)"
+        return build.map { L("Version \(short) (\($0))", "版本 \(short)（\($0)）") } ?? L("Version \(short)", "版本 \(short)")
     }
 
     var body: some View {
         Form {
             Section {
-                Toggle("Open at login", isOn: Binding(
+                Picker(L("Language", "语言"), selection: $settings.language) {
+                    ForEach(LanguagePreference.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle(L("Open at login", "登录时打开"), isOn: Binding(
                     get: { launchAtLogin.isEnabled },
                     set: { _ in launchAtLogin.toggle() }
                 ))
-                Picker("Refresh", selection: $settings.refreshInterval) {
+                Picker(L("Refresh", "刷新"), selection: $settings.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
                 }
-                Picker("Menu bar count", selection: $settings.menuBarBadgeMode) {
+                Picker(L("Menu bar count", "菜单栏数字"), selection: $settings.menuBarBadgeMode) {
                     ForEach(MenuBarBadgeMode.allCases) { Text($0.title).tag($0) }
                 }
             }
@@ -42,35 +45,22 @@ struct SettingsView: View {
                         }
                     }
                 }
-                TextField("Add port", text: $newPort, prompt: Text("e.g. 5432"))
+                TextField(L("Add port", "添加端口"), text: $newPort, prompt: Text(L("e.g. 5432", "例如 5432")))
                     .onSubmit(addPort)
             } header: {
-                Text("Ignored Ports")
+                Text(L("Ignored Ports", "忽略的端口"))
             } footer: {
-                footnote("Hidden from the list and counts. Search still finds them.")
+                footnote(L("Hidden from the list and counts. Search still finds them.", "不在列表和计数中显示，搜索时仍能找到。"))
             }
 
             Section {
-                HStack {
-                    Text(Self.brewCommand)
-                        .font(.system(.callout, design: .monospaced))
-                        .textSelection(.enabled)
-                    Spacer()
-                    Button(didCopy ? "Copied" : "Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(Self.brewCommand, forType: .string)
-                        didCopy = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            didCopy = false
-                        }
-                    }
-                    .controlSize(.small)
-                }
+                Toggle(L("Check for updates automatically", "自动检查更新"), isOn: $settings.checkForUpdates)
+                updateStatus
             } header: {
-                Text("Command Line")
+                Text(L("Updates", "更新"))
             } footer: {
-                footnote("Then run `leftopen --help` in Terminal.")
+                footnote(L("Asks GitHub for the latest release once a day. Nothing about this Mac is sent.",
+                           "每天向 GitHub 查询一次最新版本，不会发送这台 Mac 的任何信息。"))
             }
 
             Section {
@@ -87,7 +77,7 @@ struct SettingsView: View {
                         Text(version).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Link("Website", destination: URL(string: "https://songhaifan.github.io/leftopen/")!)
+                    Link(L("Website", "官网"), destination: URL(string: "https://songhaifan.github.io/leftopen/")!)
                     Link("GitHub", destination: URL(string: "https://github.com/SonghaiFan/leftopen")!)
                 }
                 .font(.callout)
@@ -98,11 +88,73 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func footnote(_ text: LocalizedStringKey) -> some View {
-        Text(text)
+    /// Parsed as Markdown so `code` spans render.
+    private func footnote(_ text: String) -> some View {
+        Text(LocalizedStringKey(text))
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var updateStatus: some View {
+        if let current = updates.currentVersion {
+            switch updates.state {
+            case let .available(release):
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label(L("LeftOpen \(release.version) is available", "LeftOpen \(release.version) 已发布"),
+                              systemImage: "arrow.down.circle.fill")
+                            .foregroundStyle(Color.accentColor)
+                        Spacer()
+                        Link(L("Release Notes", "更新说明"), destination: release.page)
+                    }
+                    if updates.installedWithHomebrew {
+                        HStack {
+                            Text(UpdateChecker.upgradeCommand)
+                                .font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled)
+                            Spacer()
+                            Button(didCopy ? L("Copied", "已复制") : L("Copy", "复制")) { copyUpgradeCommand() }
+                                .controlSize(.small)
+                        }
+                    } else {
+                        Button(L("Download", "下载")) { NSWorkspace.shared.open(release.page) }
+                            .controlSize(.small)
+                    }
+                }
+            case .checking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(L("Checking…", "正在检查…")).foregroundStyle(.secondary)
+                }
+            case .upToDate, .idle, .failed:
+                HStack {
+                    Text(updates.state == .failed
+                         ? L("Couldn't reach GitHub.", "无法连接 GitHub。")
+                         : updates.state == .upToDate
+                         ? L("\(current) is the latest version.", "\(current) 已是最新版本。")
+                         : L("Version \(current)", "版本 \(current)"))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L("Check Now", "立即检查")) { Task { await updates.check() } }
+                        .controlSize(.small)
+                }
+            }
+        } else {
+            Text(L("Development builds don't check for updates.", "开发版本不检查更新。"))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func copyUpgradeCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(UpdateChecker.upgradeCommand, forType: .string)
+        didCopy = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            didCopy = false
+        }
     }
 
     private func portChip(_ port: Int) -> some View {
@@ -116,7 +168,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Stop ignoring port \(String(port))")
+            .accessibilityLabel(L("Stop ignoring port \(String(port))", "不再忽略端口 \(String(port))"))
         }
         .padding(.leading, 8)
         .padding(.trailing, 5)

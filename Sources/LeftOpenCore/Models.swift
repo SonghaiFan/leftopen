@@ -86,6 +86,30 @@ public struct ApplicationBundle: Sendable, Equatable {
     public let direct: Bool
 }
 
+/// A launchd job (brew services, a LaunchAgent or login item) that runs the listener or its direct
+/// parent. With `keepAlive`, launchd restarts it as soon as it exits, so SIGTERM frees the port
+/// only for a moment.
+public struct LaunchdJob: Sendable, Equatable {
+    public let label: String
+    public let pid: Int32
+    public let keepAlive: Bool
+
+    public init(label: String, pid: Int32, keepAlive: Bool) {
+        self.label = label
+        self.pid = pid
+        self.keepAlive = keepAlive
+    }
+
+    /// The command that stops the job for good instead of letting launchd bring it back.
+    public var stopCommand: String {
+        let homebrewPrefix = "homebrew.mxcl."
+        if label.hasPrefix(homebrewPrefix) {
+            return "brew services stop \(label.dropFirst(homebrewPrefix.count))"
+        }
+        return "launchctl bootout gui/\(getuid())/\(label)"
+    }
+}
+
 public struct OwnerInference: Sendable, Equatable {
     public let label: String
     public let category: OwnerCategory
@@ -101,6 +125,7 @@ public struct Activity: Sendable, Equatable, Identifiable {
     public let applicationBundle: ApplicationBundle?
     public let scope: ListenerScope
     public let inference: OwnerInference
+    public var launchdJob: LaunchdJob? = nil
 
     public var id: String { "\(listener.port):\(listener.pid)" }
 }

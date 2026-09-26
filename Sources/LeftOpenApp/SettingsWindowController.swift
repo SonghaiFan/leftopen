@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import LeftOpenCore
 import SwiftUI
 
 @MainActor
@@ -6,9 +8,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
     private var window: NSWindow?
+    private var languageObserver: AnyCancellable?
 
     private override init() {
         super.init()
+        languageObserver = AppSettings.shared.$language
+            .dropFirst()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.window?.title = L("LeftOpen Settings", "LeftOpen 设置")
+                }
+            }
     }
 
     func show() {
@@ -25,7 +35,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: SettingsView())
         hosting.sizingOptions = [.preferredContentSize]
         let window = NSWindow(contentViewController: hosting)
-        window.title = "LeftOpen Settings"
+        window.title = L("LeftOpen Settings", "LeftOpen 设置")
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.delegate = self

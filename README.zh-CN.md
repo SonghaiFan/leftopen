@@ -53,10 +53,10 @@ brew install --cask songhaifan/tap/leftopen
 
 - **知道端口是谁的。** 从进程的工作目录向上找 `.git`、`package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod`，或者解析它所属的 `.app`。全局 npm 包、`python -m` 模块和 Redis / Postgres / Ollama 这类独立服务也按名字识别，很少再看到一个光秃秃的 `node` 或 `python`。
 - **真实图标，不预存。** 有 `.app` 就用它的图标；否则用项目或包自己带的（Tauri / Electron app icon、`index.html` 声明的 favicon、`public/` 约定）；否则向本机服务器抓 favicon；再没有才用符号。
-- **先看该关的。** 可关闭的端口排在前面，app 和系统服务折叠收起。菜单栏图标是一扇开着或关着的门，每一行都标着进程已经跑了多久。
+- **按来历分组。** 开发服务器（从项目、终端、编辑器或 agent 启动）、后台服务（由 launchd 管理：brew services、登录项）、App 和系统。分组即关闭方式，每组都写明：开发服务器发 SIGTERM，launchd 会重启的服务提示 `brew services stop …`，App 的端口需要退出 App。
 - **关得轻。** 确认前先列出同一进程的其他端口；关闭瞬间重新核对 PID 与启动时间；只发 `SIGTERM`。不 `SIGKILL`，不碰系统进程。
 - **本机还是局域网。** 区分绑在 `127.0.0.1` 的端口和绑在 `0.0.0.0` / 局域网地址上的端口。
-- **没有后台常驻。** 原生 SwiftUI `MenuBarExtra`。无守护进程，无 Dock 图标，无遥测。
+- **没有后台常驻。** 原生 SwiftUI `MenuBarExtra`。无守护进程，无 Dock 图标，无遥测。唯一离开这台 Mac 的网络请求是每天向 GitHub 查询一次最新版本，可在设置中关闭。
 - **终端里是同一个引擎。** App 附带 `leftopen` 命令行工具，推断和安全规则完全一致。
 
 ---
@@ -111,11 +111,8 @@ LOCAL = this Mac only · LAN = may be reachable from your local network
 ## 构建与测试
 
 ```bash
-# 运行原生测试
+# 运行测试
 swift test
-
-# 运行 CLI 原型测试
-npm test
 
 # 本地编译 App
 LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh

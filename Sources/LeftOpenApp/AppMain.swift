@@ -77,7 +77,10 @@ final class MenuModel: ObservableObject {
     @Published private(set) var closingActivityIDs: Set<String> = []
 
     private var refreshLoop: Task<Void, Never>?
+    private var scanLoop: Task<Void, Never>?
+    private var rescanRequested = false
     private var settingsObserver: AnyCancellable?
+    private var languageObserver: AnyCancellable?
 
     /// The scan minus ports the user chose to ignore, so every count agrees with the list.
     var visible: ScanSnapshot {
@@ -105,6 +108,16 @@ final class MenuModel: ObservableObject {
             .sink { [weak self] interval in
                 MainActor.assumeIsolated { self?.scheduleRefresh(interval) }
             }
+        // Owner evidence and scan limitations are written during the scan, so rescan to reword them.
+        languageObserver = AppSettings.shared.$language
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.notice = nil
+                    Task { await self?.refresh() }
+                }
+            }
     }
 
     private func scheduleRefresh(_ interval: RefreshInterval) {
@@ -130,17 +143,36 @@ final class MenuModel: ObservableObject {
         }
     }
 
+    /// Returns once a scan that started after this call has landed. Overlapping calls share one
+    /// scan loop: a request that arrives mid-scan queues a single rescan instead of a parallel one,
+    /// so a refresh after a close never settles for a snapshot taken before the signal.
     func refresh() async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
-        do {
-            snapshot = try await Task.detached(priority: .utility) { try Scanner.scan() }.value
-            lastRefresh = Date()
-            notice = nil
-        } catch {
-            post(Notice(kind: .error, text: "Scan failed: \(error.localizedDescription)"))
+        if let scanLoop {
+            rescanRequested = true
+            await scanLoop.value
+            return
         }
+        let loop = Task { await runScans() }
+        scanLoop = loop
+        await loop.value
+    }
+
+    private func runScans() async {
+        isRefreshing = true
+        defer {
+            isRefreshing = false
+            scanLoop = nil
+        }
+        repeat {
+            rescanRequested = false
+            do {
+                snapshot = try await Task.detached(priority: .utility) { try Scanner.scan() }.value
+                lastRefresh = Date()
+                notice = nil
+            } catch {
+                post(Notice(kind: .error, text: L("Scan failed: \(error.localizedDescription)", "扫描失败：\(error.localizedDescription)")))
+            }
+        } while rescanRequested
     }
 
     func previewClose(_ activity: Activity) async {
@@ -153,7 +185,7 @@ final class MenuModel: ObservableObject {
                 try CloseService.prepare(port: activity.listener.port, pid: activity.process.pid)
             }.value
         } catch {
-            post(Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)"))
+            post(Notice(kind: .warning, text: L("Close unavailable: \(error.localizedDescription)", "无法关闭：\(error.localizedDescription)")))
         }
     }
 
@@ -183,7 +215,7 @@ final class MenuModel: ObservableObject {
             }.value
             await execute(plan)
         } catch {
-            post(Notice(kind: .warning, text: "Close unavailable: \(error.localizedDescription)"))
+            post(Notice(kind: .warning, text: L("Close unavailable: \(error.localizedDescription)", "无法关闭：\(error.localizedDescription)")))
         }
     }
 
@@ -199,13 +231,16 @@ final class MenuModel: ObservableObject {
             let outcome: String
             let kind: NoticeKind
             if result.portFree {
-                outcome = "Port \(plan.port) is free."
+                outcome = L("Port \(plan.port) is free.", "端口 \(plan.port) 已释放。")
                 kind = .success
             } else if result.targetStoppedListening {
-                outcome = "PID \(plan.pid) stopped listening; port \(plan.port) is now held by \(result.remainingPIDs.map(String.init).joined(separator: ", "))."
+                let holders = result.remainingPIDs.map(String.init).joined(separator: ", ")
+                outcome = L("PID \(plan.pid) stopped listening; port \(plan.port) is now held by \(holders).",
+                            "PID \(plan.pid) 已停止监听，但端口 \(plan.port) 现在被 \(holders) 占用。")
                 kind = .warning
             } else {
-                outcome = "SIGTERM was sent, but PID \(plan.pid) still listens. No force-kill was attempted."
+                outcome = L("SIGTERM was sent, but PID \(plan.pid) still listens. No force-kill was attempted.",
+                            "已发送 SIGTERM，但 PID \(plan.pid) 仍在监听。未尝试强制结束。")
                 kind = .warning
             }
             await refresh()
@@ -214,7 +249,8 @@ final class MenuModel: ObservableObject {
             pendingPlan = nil
             selectedActivityID = nil
             let detail = error.localizedDescription
-            let outcome = detail.hasPrefix("SIGTERM was sent") ? detail : "Close refused: \(detail)"
+            let signalSent = (error as? CloseError)?.signalSent == true
+            let outcome = signalSent ? detail : L("Close refused: \(detail)", "已拒绝关闭：\(detail)")
             await refresh()
             post(Notice(kind: .warning, text: outcome))
         }
@@ -231,12 +267,12 @@ final class MenuModel: ObservableObject {
                 try CloseService.prepareBatch(activities: projects)
             }.value
             if plans.isEmpty {
-                post(Notice(kind: .warning, text: "No closable project servers found."))
+                post(Notice(kind: .warning, text: L("No closable project servers found.", "没有可关闭的项目服务器。")))
             } else {
                 pendingBatchPlans = plans
             }
         } catch {
-            post(Notice(kind: .warning, text: "Batch close unavailable: \(error.localizedDescription)"))
+            post(Notice(kind: .warning, text: L("Batch close unavailable: \(error.localizedDescription)", "无法批量关闭：\(error.localizedDescription)")))
         }
     }
 
@@ -252,15 +288,17 @@ final class MenuModel: ObservableObject {
             selectedActivityID = nil
             await refresh()
             if result.isAllSuccessful {
-                post(Notice(kind: .success, text: "Closed \(result.successfulPlans.count) project server\(result.successfulPlans.count == 1 ? "" : "s")."))
+                post(Notice(kind: .success, text: L("Closed \(result.successfulPlans.count) project server\(result.successfulPlans.count == 1 ? "" : "s").",
+                                                    "已关闭 \(result.successfulPlans.count) 个项目服务器。")))
             } else {
-                post(Notice(kind: .warning, text: "Closed \(result.successfulPlans.count) of \(result.totalCount) servers. \(result.failedPlans.count) could not be closed."))
+                post(Notice(kind: .warning, text: L("Closed \(result.successfulPlans.count) of \(result.totalCount) servers. \(result.failedPlans.count) could not be closed.",
+                                                    "已关闭 \(result.successfulPlans.count)/\(result.totalCount) 个服务器，\(result.failedPlans.count) 个未能关闭。")))
             }
         } catch {
             pendingBatchPlans = nil
             selectedActivityID = nil
             await refresh()
-            post(Notice(kind: .warning, text: "Batch close failed: \(error.localizedDescription)"))
+            post(Notice(kind: .warning, text: L("Batch close failed: \(error.localizedDescription)", "批量关闭失败：\(error.localizedDescription)")))
         }
     }
 }
@@ -268,6 +306,7 @@ final class MenuModel: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        MainActor.assumeIsolated { UpdateChecker.shared.start() }
     }
 }
 
@@ -311,11 +350,12 @@ struct LeftOpenApp: App {
 
     private var accessibilityLabel: String {
         if model.notice?.kind == .error {
-            return "LeftOpen scan failed; \(model.portCount) last known listening ports"
+            return L("LeftOpen scan failed; \(model.portCount) last known listening ports", "LeftOpen 扫描失败；上次已知 \(model.portCount) 个监听端口")
         }
         if model.hasOpenDoors {
-            return "LeftOpen, \(model.closablePortCount) open dev ports, \(model.portCount) total ports"
+            return L("LeftOpen, \(model.closablePortCount) open dev ports, \(model.portCount) total ports",
+                     "LeftOpen，\(model.closablePortCount) 个可关闭端口，共 \(model.portCount) 个端口")
         }
-        return "LeftOpen, all doors closed, 0 dev servers running"
+        return L("LeftOpen, all doors closed, 0 dev servers running", "LeftOpen，门都关好了，没有可关闭的端口")
     }
 }
