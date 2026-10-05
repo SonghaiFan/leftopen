@@ -438,12 +438,192 @@ final class LeftOpenCoreTests: XCTestCase {
         XCTAssertEqual(category(parents: ["some-daemon"]), .other)
     }
 
+    func testContainerRuntimesFormTheirOwnCategory() {
+        func runtimeActivity(path: String, bundleName: String? = nil, parents: [String] = []) -> Activity {
+            let listener = Listener(pid: 42, command: "x", uid: Int32(getuid()), user: nil,
+                port: 8080, addresses: ["127.0.0.1"])
+            let process = ProcessFact(pid: 42, ppid: 500, command: "x", executablePath: path,
+                uid: Int32(getuid()), user: nil, cwd: nil)
+            let chain = parents.enumerated().map { index, name in
+                ProcessFact(pid: Int32(100 + index), ppid: nil, command: name, executablePath: nil,
+                    uid: Int32(getuid()), user: nil, cwd: nil)
+            }
+            let bundle = bundleName.map { ApplicationBundle(name: $0, path: "/Applications/\($0).app", sourcePID: 99, direct: true) }
+            return Activity(listener: listener, process: process, parentChain: chain,
+                projectMarker: nil, applicationBundle: bundle, scope: .local,
+                inference: OwnerInference(label: bundleName ?? "x", category: .application,
+                    confidence: "high", reason: "Fixture."))
+        }
+
+        // Docker Desktop forwards through com.docker.backend inside its app bundle.
+        let backend = runtimeActivity(path: "/Applications/Docker.app/Contents/MacOS/com.docker.backend", bundleName: "Docker")
+        XCTAssertEqual(PortCategory.classify([backend]), .container)
+        XCTAssertTrue(CloseService.protectionReason(for: backend)?.contains("docker ps") == true)
+
+        // OrbStack's forwarders sit inside its bundle.
+        XCTAssertEqual(PortCategory.classify([runtimeActivity(path: "/Applications/OrbStack.app/Contents/MacOS/OrbStack-helper", bundleName: "OrbStack")]), .container)
+
+        // colima / a standalone daemon forward via docker-proxy, a child of the daemon.
+        XCTAssertEqual(PortCategory.classify([runtimeActivity(path: "/Users/me/.colima/_lima/colima/docker-proxy", parents: ["dockerd", "colima"])]), .container)
+
+        // Once the container is resolved, the refusal names the exact stop command.
+        var resolved = backend
+        resolved.container = ContainerInfo(name: "leftopen-db", image: "postgres:16")
+        XCTAssertTrue(CloseService.protectionReason(for: resolved)?.contains("docker stop leftopen-db") == true)
+
+        // An ordinary app still lands in Apps.
+        XCTAssertEqual(PortCategory.classify([runtimeActivity(path: "/Applications/Editor.app/Contents/MacOS/Editor", bundleName: "Editor")]), .app)
+    }
+
+    func testContainerResolverParsesDockerPsOutput() {
+        let output = """
+            leftopen-db\tpostgres:16\t0.0.0.0:5432->5432/tcp, :::5432->5432/tcp
+            web\tnginx:alpine\t0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+            internal\tredis:7\t6379/tcp, 6379->6379/udp
+            """
+        let resolved = ContainerResolver.parse(output, ports: [5432, 8080, 9999])
+        XCTAssertEqual(resolved[5432], ContainerInfo(name: "leftopen-db", image: "postgres:16"))
+        XCTAssertEqual(resolved[8080]?.name, "web")
+        XCTAssertNil(resolved[9999], "an unpublishable lookup stays unresolved")
+        XCTAssertEqual(resolved.count, 2, "ports without a host mapping resolve to nothing")
+    }
+
+    func testContainerResolverParsesEngineListJSON() {
+        let json = """
+            [
+              {"Id":"8dfafdbc3a40abcdef0123456789","Names":["/leftopen-db"],"Image":"postgres:16",
+               "Ports":[{"IP":"0.0.0.0","PrivatePort":5432,"PublicPort":5432,"Type":"tcp"},
+                        {"IP":"::","PrivatePort":5432,"PublicPort":5432,"Type":"tcp"}],
+               "Labels":{"com.docker.compose.project":"leftopen",
+                         "com.docker.compose.project.working_dir":"/Users/me/leftopen",
+                         "com.docker.compose.project.config_files":"/Users/me/leftopen/compose.yaml"},
+               "Mounts":[{"Source":"/Users/me/leftopen/data","Destination":"/var/lib/postgresql/data","Type":"bind"}]},
+              {"Id":"9cd87474be90","Names":["/nostalgic_turing"],"Image":"docker.io/library/redis:7-alpine",
+               "Ports":[{"IP":"0.0.0.0","PrivatePort":6379,"PublicPort":6379,"Type":"tcp"}],
+               "Labels":{},"Mounts":[{"Source":"/Users/me/side","Destination":"/data","Type":"bind"}]},
+              {"Id":"aaa","Names":["/internal-only"],"Image":"redis:7","Ports":[{"PrivatePort":6379,"Type":"tcp"}],
+               "Labels":null,"Mounts":[]}
+            ]
+            """
+        let resolved = ContainerResolver.parseEngineList(Data(json.utf8), ports: [5432, 6379])!
+
+        let compose = resolved[5432]
+        XCTAssertEqual(compose?.name, "leftopen-db")
+        XCTAssertEqual(compose?.id, "8dfafdbc3a40")
+        XCTAssertEqual(compose?.composeProject, "leftopen")
+        XCTAssertEqual(compose?.composeDir, "/Users/me/leftopen", "the compose file's directory wins over working_dir")
+        XCTAssertEqual(compose?.mounts, [ContainerMount(source: "/Users/me/leftopen/data", destination: "/var/lib/postgresql/data")])
+        XCTAssertEqual(compose?.displayName, "leftopen-db")
+
+        let generated = resolved[6379]
+        XCTAssertEqual(generated?.name, "nostalgic_turing")
+        XCTAssertEqual(generated?.displayName, "redis", "a generated name falls back to the image")
+        XCTAssertNil(generated?.composeProject)
+        XCTAssertEqual(generated?.mounts.first?.source, "/Users/me/side")
+    }
+
+    func testContainerResolverParsesRestartPolicy() {
+        let always = """
+            {"HostConfig":{"RestartPolicy":{"Name":"always","MaximumRetryCount":0}}}
+            """
+        XCTAssertEqual(ContainerResolver.parseRestartPolicy(Data(always.utf8)), "always")
+
+        let dockerRun = """
+            {"HostConfig":{"RestartPolicy":{"Name":"no","MaximumRetryCount":0}}}
+            """
+        XCTAssertEqual(ContainerResolver.parseRestartPolicy(Data(dockerRun.utf8)), "no")
+        let activity = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/docker-proxy")
+        let container = ContainerInfo(name: "db", image: "postgres:16")
+        XCTAssertTrue(ContainerStopPlan(activity: activity, container: container,
+                                         restartPolicy: "always").resurrectsOnDaemonRestart)
+        XCTAssertFalse(ContainerStopPlan(activity: activity, container: container,
+                                         restartPolicy: "no").resurrectsOnDaemonRestart)
+        XCTAssertFalse(ContainerStopPlan(activity: activity, container: container,
+                                         restartPolicy: nil).resurrectsOnDaemonRestart)
+    }
+
+    func testContainerNamesPreferSomethingReadable() {
+        XCTAssertTrue(ContainerInfo.isGeneratedName("nostalgic_turing"))
+        XCTAssertFalse(ContainerInfo.isGeneratedName("leftopen-db"), "a chosen --name keeps the row")
+        XCTAssertFalse(ContainerInfo.isGeneratedName("leftopen_db_2"), "compose names have three parts")
+        XCTAssertFalse(ContainerInfo.isGeneratedName("LeftOpen"))
+        XCTAssertEqual(ContainerInfo(name: "nostalgic_turing", image: "redis:7-alpine").displayName, "redis")
+        XCTAssertEqual(ContainerInfo(name: "nostalgic_turing", image: "ghcr.io/acme/api:v2").displayName, "api")
+        XCTAssertEqual(ContainerInfo(name: "chosen", image: "redis:7").displayName, "chosen")
+        XCTAssertEqual(ContainerInfo(name: "proj-web-1", image: "nginx",
+                                     composeProject: "proj").displayName, "proj-web-1")
+    }
+
+    func testSocketClientTalksToTheLocalDaemon() throws {
+        guard let socket = ContainerResolver.daemonSocket() else {
+            throw XCTSkip("No local Docker daemon socket on this machine.")
+        }
+        let body = UnixSocketHTTP.get(socket, path: "/version", timeout: 2)
+        let json = String(decoding: try XCTUnwrap(body), as: UTF8.self)
+        XCTAssertTrue(json.contains("ApiVersion") || json.contains("Version"),
+                      "the daemon answered over the unix socket")
+
+        // The production path against the daemon's real chunked response: a body that decodes
+        // and parses is the whole socket story end to end.
+        let list = UnixSocketHTTP.get(socket, path: "/containers/json", timeout: 2)
+        XCTAssertNotNil(ContainerResolver.parseEngineList(try XCTUnwrap(list), ports: []))
+    }
+
+    /// The Docker daemon chunks `/containers/json`; an undecoded body kills every socket resolve.
+    func testChunkedEngineResponseIsDecoded() throws {
+        let json = #"[{"Names":["/leftopen-db"],"Image":"postgres:16","Ports":[{"PublicPort":5432,"Type":"tcp"}],"Labels":null,"Mounts":[]}]"#
+        let pieces = [json.prefix(30), json.dropFirst(30).prefix(20), json.dropFirst(50)]
+        var raw = Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)
+        for piece in pieces {
+            raw.append(Data(String(piece.count, radix: 16).utf8))
+            raw.append(Data("\r\n".utf8))
+            raw.append(Data(piece.utf8))
+            raw.append(Data("\r\n".utf8))
+        }
+        raw.append(Data("0\r\n\r\n".utf8))
+
+        let body = try XCTUnwrap(UnixSocketHTTP.responseBody(raw))
+        XCTAssertEqual(String(decoding: body, as: UTF8.self), json)
+        XCTAssertEqual(ContainerResolver.parseEngineList(body, ports: [5432])?[5432]?.name, "leftopen-db")
+
+        // A truncated stream has no zero-size terminator and must not parse halfway.
+        let truncated = raw.subdata(in: raw.startIndex..<raw.count - 7)
+        XCTAssertNil(UnixSocketHTTP.responseBody(truncated))
+    }
+
+    /// A failing socket must never take the CLI fallback down with it.
+    func testSocketFailureStillFallsBackToCLI() throws {
+        guard ContainerResolver.daemonSocket() != nil else {
+            throw XCTSkip("No local Docker daemon socket on this machine.")
+        }
+        let viaCLI = [5432: ContainerInfo(name: "from-cli", image: "postgres:16")]
+        var socketAttempts = 0
+        let first = ContainerResolver.resolve(for: [5432], socketFetch: { _ in
+            socketAttempts += 1
+            return nil
+        }, cliFetch: { ports in
+            XCTAssertEqual(ports, [5432])
+            return viaCLI
+        })
+        XCTAssertEqual(first, viaCLI)
+
+        // The socket is in backoff now; the CLI still runs.
+        let second = ContainerResolver.resolve(for: [5432], socketFetch: { _ in
+            XCTFail("a backoff-gated socket must not be probed again")
+            return Data("[]".utf8)
+        }, cliFetch: { _ in viaCLI })
+        XCTAssertEqual(second, viaCLI)
+        XCTAssertEqual(socketAttempts, 1)
+    }
+
     func testCoreTextFollowsTheSelectedLanguage() {
         defer { Localization.current = .english }
         XCTAssertEqual(PortCategory.devServer.title, "Dev Servers")
+        XCTAssertEqual(PortCategory.container.title, "Containers")
 
         Localization.current = .chinese
         XCTAssertEqual(PortCategory.devServer.title, "开发服务器")
+        XCTAssertEqual(PortCategory.container.title, "容器")
         var service = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/syncthing")
         service.launchdJob = LaunchdJob(label: "homebrew.mxcl.syncthing", pid: 42, keepAlive: true)
         XCTAssertEqual(CloseService.protectionReason(for: service),

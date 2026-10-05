@@ -124,8 +124,10 @@ public struct Activity: Sendable, Equatable, Identifiable {
     public let projectMarker: ProjectMarker?
     public let applicationBundle: ApplicationBundle?
     public let scope: ListenerScope
-    public let inference: OwnerInference
+    public var inference: OwnerInference
     public var launchdJob: LaunchdJob? = nil
+    /// Set when a container runtime forwards this port and `docker ps` matched it to a container.
+    public var container: ContainerInfo? = nil
 
     public var id: String { "\(listener.port):\(listener.pid)" }
 }

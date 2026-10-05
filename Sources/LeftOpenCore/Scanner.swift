@@ -306,7 +306,28 @@ public enum Scanner {
                 scope: listenerScope(listener.addresses), inference: inference,
                 launchdJob: launchdJobs[listener.pid] ?? process.ppid.flatMap { launchdJobs[$0] })
         }
-        return ScanSnapshot(activities: activities, limitations: limitations)
+        return ScanSnapshot(activities: resolveContainers(activities), limitations: limitations)
+    }
+
+    /// Forwarded ports name their container once the Engine API or `docker ps` can match them; the
+    /// runtime keeps naming the row otherwise.
+    private static func resolveContainers(_ activities: [Activity]) -> [Activity] {
+        let forwarded = Set(activities.filter(PortCategory.isContainerRuntime).map(\.listener.port))
+        let containers = ContainerResolver.containers(for: forwarded)
+        guard !containers.isEmpty else { return activities }
+        return activities.map { activity in
+            guard let container = containers[activity.listener.port] else { return activity }
+            let detail = container.composeProject.map { project in
+                    L("compose project \(project)", "compose 项目 \(project)")
+                } ?? container.image
+            let inference = OwnerInference(label: container.displayName, category: .service, confidence: "high",
+                reason: L("Port \(activity.listener.port) is forwarded to container \(container.name) (\(detail)).",
+                          "端口 \(activity.listener.port) 转发到容器 \(container.name)（\(detail)）。"))
+            var updated = activity
+            updated.inference = inference
+            updated.container = container
+            return updated
+        }
     }
 
     /// launchd jobs whose PID is one of the listeners or their direct parents (a service may run a

@@ -118,6 +118,14 @@ public enum CloseService {
         guard uid == currentUID else { throw CloseError(L("PID \(target.pid) belongs to another user.", "PID \(target.pid) 属于其他用户。")) }
         guard let path = target.executablePath else { throw CloseError(L("PID \(target.pid) has no verified executable path.", "无法确认 PID \(target.pid) 的可执行文件路径。")) }
         if safetyProtectionEnabled {
+            if PortCategory.isContainerRuntime(activity) {
+                if let container = activity.container {
+                    throw CloseError(L("PID \(target.pid) only forwards a port for container \(container.name). Stop it with `\(container.stopCommand)`.",
+                        "PID \(target.pid) 只是为容器 \(container.name) 转发端口。请用 `\(container.stopCommand)` 停止该容器。"))
+                }
+                throw CloseError(L("PID \(target.pid) only forwards a port for some container. Find it with `docker ps` and stop it with `docker stop …`.",
+                    "PID \(target.pid) 只是在为某个容器转发端口。请先用 `docker ps` 找到它，再用 `docker stop …` 停止。"))
+            }
             let protected = ["/System/", "/usr/bin/", "/usr/sbin/", "/usr/libexec/", "/bin/", "/sbin/"]
             guard !protected.contains(where: { path.hasPrefix($0) }) else {
                 throw CloseError(L("PID \(target.pid) uses an operating-system executable; refusing to close it.", "PID \(target.pid) 是系统程序，拒绝关闭。"))

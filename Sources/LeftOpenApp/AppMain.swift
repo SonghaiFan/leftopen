@@ -73,6 +73,7 @@ final class MenuModel: ObservableObject {
     @Published var isClosing = false
     @Published var pendingPlan: ClosePlan?
     @Published var pendingBatchPlans: [ClosePlan]?
+    @Published var pendingContainerStop: ContainerStopPlan?
     @Published private(set) var notice: Notice?
     @Published private(set) var forceCloseOffer: ForceCloseOffer?
     @Published var selectedActivityID: String?
@@ -130,6 +131,7 @@ final class MenuModel: ObservableObject {
                 MainActor.assumeIsolated {
                     self?.notice = nil
                     self?.forceCloseOffer = nil
+                    self?.pendingContainerStop = nil
                     Task { await self?.refresh() }
                 }
             }
@@ -140,6 +142,7 @@ final class MenuModel: ObservableObject {
                 MainActor.assumeIsolated {
                     self?.pendingPlan = nil
                     self?.pendingBatchPlans = nil
+                    self?.pendingContainerStop = nil
                     self?.forceCloseOffer = nil
                 }
             }
@@ -241,6 +244,56 @@ final class MenuModel: ObservableObject {
     func confirmClose() async {
         guard let plan = pendingPlan, !isClosing else { return }
         await execute(plan)
+    }
+
+    /// The stop review is prepared like a close plan: the restart policy is fetched once, here,
+    /// instead of on every scan.
+    func previewContainerStop(_ activity: Activity) async {
+        guard !isPreparingClose && !isClosing, let container = activity.container else { return }
+        isPreparingClose = true
+        notice = nil
+        defer { isPreparingClose = false }
+        let policy = await Task.detached(priority: .utility) {
+            ContainerResolver.restartPolicy(of: container)
+        }.value
+        pendingContainerStop = ContainerStopPlan(activity: activity, container: container,
+                                                 restartPolicy: policy)
+    }
+
+    func confirmContainerStop() async {
+        guard let plan = pendingContainerStop, !isClosing else { return }
+        isClosing = true
+        defer { isClosing = false }
+        // The ports this container owned before stopping; the refreshed scan tells which remain.
+        let containerPorts = Set(snapshot.activities.filter {
+            $0.container?.name == plan.container.name
+                || (plan.container.id.isEmpty == false && $0.container?.id == plan.container.id)
+        }.map(\.listener.port))
+        do {
+            _ = try await Task.detached(priority: .utility) {
+                try ContainerResolver.stop(plan.container)
+            }.value
+            pendingContainerStop = nil
+            selectedActivityID = nil
+            await refresh()
+            let stillForwarded = snapshot.activities.filter { containerPorts.contains($0.listener.port) }
+            let outcome: String
+            let kind: NoticeKind
+            if stillForwarded.isEmpty {
+                outcome = L("Container \(plan.container.name) stopped; port \(plan.activity.listener.port) is free.",
+                            "容器 \(plan.container.name) 已停止，端口 \(plan.activity.listener.port) 已释放。")
+                kind = .success
+            } else {
+                let held = stillForwarded.map { String($0.listener.port) }.sorted().joined(separator: ", ")
+                outcome = L("Container \(plan.container.name) stopped, but \(held) still listen. Another container or the runtime may hold them.",
+                            "容器 \(plan.container.name) 已停止，但 \(held) 仍在监听，可能由其他容器或运行时占用。")
+                kind = .warning
+            }
+            post(Notice(kind: kind, text: outcome))
+        } catch {
+            let detail = error.localizedDescription
+            post(Notice(kind: .error, text: L("docker stop failed: \(detail)", "docker stop 失败：\(detail)")))
+        }
     }
 
     /// Swipe-to-close: the swipe past the threshold is the confirmation, so the plan is prepared

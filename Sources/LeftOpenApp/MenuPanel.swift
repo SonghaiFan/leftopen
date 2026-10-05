@@ -106,7 +106,12 @@ struct MenuPanel: View {
         var groups: [String: [Activity]] = [:]
         var orderedIDs: [String] = []
         for activity in activities {
+            // One runtime forwarder process serves many containers. Rows follow the owner a human
+            // thinks in: the compose project, else the single container, so related ports of one
+            // project stay together and a port never sits under an unrelated name.
+            let owner = activity.container.map { $0.composeProject ?? $0.name }
             let id = "pid:\(activity.process.pid):\(activity.process.executablePath ?? activity.process.command)"
+                + (owner.map { ":container:\($0)" } ?? "")
             if groups[id] == nil { orderedIDs.append(id) }
             groups[id, default: []].append(activity)
         }
@@ -126,7 +131,9 @@ struct MenuPanel: View {
     private var path: [Page] {
         var pages: [Page] = [.list]
         if model.selectedActivityID != nil { pages.append(.port) }
-        if model.pendingPlan != nil || model.pendingBatchPlans != nil { pages.append(.review) }
+        if model.pendingPlan != nil || model.pendingBatchPlans != nil || model.pendingContainerStop != nil {
+            pages.append(.review)
+        }
         return pages
     }
 
@@ -143,6 +150,8 @@ struct MenuPanel: View {
             model.pendingBatchPlans = nil
         } else if model.pendingPlan != nil {
             model.pendingPlan = nil
+        } else if model.pendingContainerStop != nil {
+            model.pendingContainerStop = nil
         } else {
             model.selectedActivityID = nil
         }
@@ -242,6 +251,8 @@ struct MenuPanel: View {
                 batchReviewPage(plans)
             } else if let plan = model.pendingPlan {
                 reviewPage(plan)
+            } else if let stop = model.pendingContainerStop {
+                containerStopReviewPage(stop)
             }
         }
     }
@@ -527,7 +538,7 @@ struct MenuPanel: View {
                         port: expanded ? nil : group.ports[0],
                         extraPorts: expanded ? 0 : group.ports.count - 1,
                         icon: group.primary,
-                        title: group.primary.inference.label,
+                        title: group.title,
                         subtitle: group.subtitle,
                         isLAN: group.scope == .lan,
                         closeFailed: model.awaitsForceClose(group.primary),
@@ -553,7 +564,7 @@ struct MenuPanel: View {
                 PortRow(
                     port: activity.listener.port,
                     icon: activity,
-                    title: activity.inference.label,
+                    title: group.title,
                     subtitle: group.subtitle,
                     trailing: activity.process.compactUptime,
                     isLAN: activity.scope == .lan,
@@ -573,7 +584,8 @@ struct MenuPanel: View {
         return PortRow(
             port: activity.listener.port,
             icon: nil,
-            title: activity.listener.addresses.joined(separator: ", "),
+            title: activity.container.map(\.displayName)
+                ?? activity.listener.addresses.joined(separator: ", "),
             subtitle: activity.scope == .lan ? L("LAN-facing", "局域网可见") : L("Local only", "仅本机"),
             isLAN: activity.scope == .lan,
             closeFailed: model.awaitsForceClose(activity),
@@ -695,6 +707,22 @@ struct MenuPanel: View {
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
+                if let container = activity.container {
+                    HStack {
+                        Button {
+                            Task { await model.previewContainerStop(activity) }
+                        } label: {
+                            Label(L("Stop Container…", "停止容器…"), systemImage: "stop.fill")
+                                .foregroundStyle(Color(nsColor: .systemRed))
+                        }
+                        .disabled(model.isPreparingClose || model.isClosing)
+                        .help(L("Review stopping container \(container.name) with docker stop", "确认用 docker stop 停止容器 \(container.name)"))
+                        Spacer(minLength: 0)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     infoRow(L("Command", "命令"), activity.process.command)
@@ -707,6 +735,18 @@ struct MenuPanel: View {
                     }
                     infoRow(L("Executable", "可执行文件"), compactPath(activity.process.executablePath))
                     infoRow(L("Folder", "目录"), compactPath(activity.process.cwd))
+                    if let container = activity.container {
+                        if let project = container.composeProject {
+                            let location = container.composeDir.map { " · \(compactPath($0))" } ?? ""
+                            infoRow(L("Compose", "Compose"), project + location)
+                        }
+                        if !container.mounts.isEmpty {
+                            let mounts = container.mounts
+                                .map { "\(compactPath($0.source)) → \($0.destination)" }
+                                .joined(separator: "\n")
+                            infoRow(L("Mounts", "挂载"), mounts)
+                        }
+                    }
                     infoRow(L("Addresses", "地址"), activity.listener.addresses.joined(separator: ", "))
                     if let webURL {
                         infoRow(L("Web URL", "网址"), webURL.absoluteString)
@@ -824,6 +864,47 @@ struct MenuPanel: View {
         }
     }
 
+    /// Stopping a container is LeftOpen's one shell action: `docker stop` through the CLI, which
+    /// gives the container its grace period and leaves the runtime itself running.
+    private func containerStopReviewPage(_ plan: ContainerStopPlan) -> some View {
+        let container = plan.container
+        let containerPorts = model.snapshot.activities
+            .filter { $0.container?.name == container.name
+                || (container.id.isEmpty == false && $0.container?.id == container.id) }
+            .map { String($0.listener.port) }
+        return VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L("Stop container \(container.name)?", "停止容器 \(container.name)？"))
+                        .font(.title3.weight(.semibold))
+                    Text(L("LeftOpen runs `docker stop`, which asks the container to exit and gives it about 10 seconds before forcing it. The runtime itself keeps running.",
+                            "LeftOpen 会执行 `docker stop`，先请求容器自行退出，约 10 秒后才强制结束。容器运行时本身不受影响。"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    infoRow(L("Command", "命令"), container.stopCommand)
+                    infoRow(L("Image", "镜像"), container.image)
+                    if let project = container.composeProject {
+                        infoRow(L("Compose", "Compose"), project + (container.composeDir.map { " · \($0)" } ?? ""))
+                    }
+                    if containerPorts.count > 1 {
+                        caution(L("All of this container's ports close too: \(containerPorts.sorted().joined(separator: ", ")).",
+                                    "该容器的全部端口也会一起关闭：\(containerPorts.sorted().joined(separator: ", "))。"))
+                    }
+                    if plan.resurrectsOnDaemonRestart {
+                        caution(L("This container restarts when Docker does. To keep it down across restarts, run `docker update --restart=no \(container.name)`.",
+                                    "该容器设置了自动重启策略，Docker 重启后会再次运行。如需一直保持停止，可执行 `docker update --restart=no \(container.name)`。"))
+                    }
+                }
+                .padding(14)
+            }
+            confirmBar(L("Stop Container", "停止容器")) {
+                Task { await model.confirmContainerStop() }
+            }
+        }
+    }
+
     /// Shared by both review pages: Cancel is the header's back button (Esc), so the bar only
     /// carries progress and the destructive default action.
     private func confirmBar(_ title: String, action: @escaping () -> Void) -> some View {
@@ -908,6 +989,22 @@ struct MenuPanel: View {
             copy(ports.map(String.init).joined(separator: ", "))
         }
         Button(L("Copy PID", "复制 PID")) { copy(String(primary.process.pid)) }
+        // A compose row spans several containers; each one gets its own stop item.
+        let stopTargets = activities.reduce(
+            into: [(container: ContainerInfo, activity: Activity)]()
+        ) { partial, activity in
+            guard let container = activity.container,
+                  !partial.contains(where: { $0.container.name == container.name }) else { return }
+            partial.append((container, activity))
+        }
+        if !stopTargets.isEmpty {
+            Divider()
+            ForEach(stopTargets, id: \.container.name) { target in
+                Button(L("Stop Container \(target.container.displayName)…", "停止容器 \(target.container.displayName)…")) {
+                    Task { await model.previewContainerStop(target.activity) }
+                }
+            }
+        }
         if let folder = revealTarget(for: primary) {
             Divider()
             Button(L("Reveal in Finder", "在访达中显示")) { reveal(folder) }
@@ -933,9 +1030,12 @@ struct MenuPanel: View {
     }
 
     private func revealTarget(for activity: Activity) -> String? {
-        let candidates = [activity.projectMarker?.root, activity.applicationBundle?.path,
-                          activity.inference.category == .project ? activity.process.cwd : nil,
-                          activity.process.executablePath]
+        // The compose project directory, then a mounted code directory, say where the container
+        // came from; the runtime's app bundle is only the last resort.
+        let mounts = (activity.container?.mounts ?? []).map(\.source)
+        let candidates = [activity.container?.composeDir, activity.projectMarker?.root,
+                          activity.inference.category == .project ? activity.process.cwd : nil]
+            + mounts + [activity.applicationBundle?.path, activity.process.executablePath]
         return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0) }
     }
 
@@ -971,6 +1071,18 @@ private struct ListenerGroup: Identifiable {
     var ports: [Int] { Array(Set(activities.map(\.listener.port))).sorted() }
     var pids: [Int32] { Array(Set(activities.map(\.process.pid))).sorted() }
     var scope: ListenerScope { activities.contains { $0.scope == .lan } ? .lan : .local }
+    /// The containers this row speaks for, in first-seen order.
+    var containers: [ContainerInfo] {
+        var seen = Set<String>()
+        return activities.compactMap { activity in
+            activity.container.flatMap { seen.insert($0.name).inserted ? $0 : nil }
+        }
+    }
+
+    /// A compose project names the row even when it runs several containers.
+    var title: String {
+        primary.container?.composeProject ?? primary.inference.label
+    }
 
     /// What a swipe or ✕ closes: only offered when one closable PID owns every port in the row.
     func closeTarget(safetyProtectionEnabled: Bool) -> Activity? {
@@ -980,6 +1092,10 @@ private struct ListenerGroup: Identifiable {
 
     var subtitle: String {
         if pids.count > 1 { return L("\(pids.count) processes", "\(pids.count) 个进程") }
+        if containers.count > 1 {
+            return L("\(containers.count) containers · PID \(primary.process.pid)",
+                     "\(containers.count) 个容器 · PID \(primary.process.pid)")
+        }
         let pid = "PID \(primary.process.pid)"
         return primary.inference.label == primary.process.command ? pid : "\(primary.process.command) · \(pid)"
     }
