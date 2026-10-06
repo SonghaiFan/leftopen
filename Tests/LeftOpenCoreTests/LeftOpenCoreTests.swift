@@ -246,6 +246,23 @@ final class LeftOpenCoreTests: XCTestCase {
             activities: [fixtureActivity(pid: 43, path: "/opt/local/bin/node")], freshStartTime: "start one"))
     }
 
+    func testGentleCloseRejectsNewPortsBeforeSendingSignal() throws {
+        let (activity, plan) = try forceFixture()
+        let extra = fixtureActivity(pid: plan.pid, path: plan.executablePath, port: 4000)
+        var sent = false
+        XCTAssertThrowsError(try CloseService.perform(plan, signal: SIGTERM,
+            scan: { [activity, extra] }, startTime: { _ in plan.startTime },
+            send: { _, _ in sent = true; return 0 }, listeners: { [] }, wait: {}))
+        XCTAssertFalse(sent)
+        let reviewed = ClosePlan(port: plan.port, pid: plan.pid, uid: plan.uid,
+            executablePath: plan.executablePath, startTime: plan.startTime, activity: activity,
+            otherPorts: [4000], peerPIDs: [], safetyProtectionEnabled: true)
+        XCTAssertNoThrow(try CloseService.verify(plan: reviewed, activities: [activity, extra],
+                                               freshStartTime: plan.startTime))
+        XCTAssertNoThrow(try CloseService.verify(plan: reviewed, activities: [activity],
+                                               freshStartTime: plan.startTime))
+    }
+
     func testCloseRecheckRejectsNewPortPeer() throws {
         let activity = fixtureActivity(pid: 42, path: "/opt/local/bin/node")
         let plan = ClosePlan(port: 3000, pid: 42, uid: Int32(getuid()),
@@ -690,3 +707,4 @@ private final class RedirectHTTPProtocol: URLProtocol {
 
     override func stopLoading() { }
 }
+
