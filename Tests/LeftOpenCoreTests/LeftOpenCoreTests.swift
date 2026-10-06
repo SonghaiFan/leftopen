@@ -4,6 +4,47 @@ import XCTest
 @testable import LeftOpenCore
 
 final class LeftOpenCoreTests: XCTestCase {
+    func testPortlessRoutesMatchWrapperAncestryAndProxyState() throws {
+        let proxy = fixtureActivity(pid: 99, path: "/opt/local/bin/node", port: 443)
+        let child = fixtureActivity(pid: 42, path: "/opt/local/bin/node")
+        let data = Data("[{\"hostname\":\"myapp.localhost\",\"port\":3000,\"pid\":42}]".utf8)
+        let urls = try Portless.urls(routesData: data, proxyPort: 443, tls: true,
+                                    proxyPID: 99, activities: [proxy, child])
+        XCTAssertEqual(urls[child.id]?.first?.absoluteString, "https://myapp.localhost")
+        XCTAssertTrue(try Portless.urls(routesData: data, proxyPort: 443, tls: true,
+                                       proxyPID: 99, activities: [child]).isEmpty)
+        let wrapper = fixtureActivity(pid: 77, path: "/opt/local/bin/node").process
+        let wrapped = Activity(listener: child.listener, process: child.process, parentChain: [wrapper],
+                               projectMarker: nil, applicationBundle: nil, scope: child.scope, inference: child.inference)
+        let wrappedData = Data("[{\"hostname\":\"wrapped.localhost\",\"port\":3000,\"pid\":77}]".utf8)
+        XCTAssertEqual(try Portless.urls(routesData: wrappedData, proxyPort: 443, tls: true,
+                                        proxyPID: 99, activities: [proxy, wrapped])[child.id]?.first?.host,
+                       "wrapped.localhost")
+        let stale = Data("[{\"hostname\":\"myapp.localhost\",\"port\":3000,\"pid\":123456}]".utf8)
+        XCTAssertTrue(try Portless.urls(routesData: stale, proxyPort: 443, tls: true,
+                                       proxyPID: 99, activities: [proxy, child]).isEmpty)
+        let aliases = Data("[{\"hostname\":\"myapp.test\",\"port\":3000,\"pid\":0},{\"hostname\":\"api.myapp.test\",\"port\":3000,\"pid\":0}]".utf8)
+        let customProxy = fixtureActivity(pid: 99, path: "/opt/local/bin/node", port: 1355)
+        let custom = try Portless.urls(routesData: aliases, proxyPort: 1355, tls: false,
+                                      proxyPID: 99, activities: [customProxy, child])
+        XCTAssertEqual(custom[child.id]?.map(\.absoluteString),
+                       ["http://api.myapp.test:1355", "http://myapp.test:1355"])
+        XCTAssertThrowsError(try Portless.urls(routesData: Data("{}".utf8), proxyPort: 443,
+                                              tls: true, proxyPID: 99, activities: [proxy, child]))
+    }
+
+    func testPortlessNameAndCommandGeneration() {
+        XCTAssertTrue(Portless.validName("api.my-app"))
+        for name in ["", "bad;touch /tmp/x", "UPPER", "-bad", "bad..name", "bad.", String(repeating: "a", count: 64)] {
+            XCTAssertFalse(Portless.validName(name), name)
+        }
+        XCTAssertEqual(Portless.suggestedName("@team/My App"), "team-my-app")
+        XCTAssertEqual(Portless.launchCommand(name: "list", projectRoot: "/tmp/My App", command: "next dev"),
+                       "cd '/tmp/My App' && portless run --name list next dev")
+        XCTAssertNil(Portless.launchCommand(name: "bad;cmd", projectRoot: "/tmp", command: "next dev"))
+        XCTAssertNil(Portless.launchCommand(name: "myapp", projectRoot: "/tmp", command: " "))
+    }
+
     private func forceFixture() throws -> (Activity, ClosePlan) {
         let activity = fixtureActivity(pid: 42, path: "/opt/local/bin/node")
         let plan = try CloseService.makePlan(activities: [activity], port: 3000, pid: 42,
