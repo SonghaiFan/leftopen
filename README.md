@@ -135,3 +135,18 @@ LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 ## License
 
 [MIT License](LICENSE)
+
+
+## Portless fixed project addresses
+
+The Portless section in port details reads `~/.portless`, matches registered routes to a listening proxy and service process, and offers Open/Copy actions. HTTP/HTTPS, custom proxy ports, and multiple hostnames are supported. If you use `PORTLESS_STATE_DIR`, enter that directory under Portless setup. Read failures do not block port scanning.
+
+Save an alias per project directory and enter a startup command to copy, for example:
+
+```bash
+cd '/path/to/myapp' && portless run --name myapp next dev
+```
+
+Install with `npm install -g portless`, then run the generated command in Terminal. Saving an alias does not register an already-running service. URLs come from actual routes and proxy settings. LeftOpen only reads Portless state; it does not alter routes, certificates, or system configuration. The adapter targets Portless's current pre-1.0 state format and may need updating if that format changes.
+
+[Portless documentation](https://github.com/vercel-labs/portless)
