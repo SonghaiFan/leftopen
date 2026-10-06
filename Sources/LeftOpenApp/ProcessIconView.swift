@@ -49,11 +49,15 @@ enum IconBackgroundAnalyzer {
     }
 }
 
-final class DynamicFaviconFetcher: NSObject, URLSessionDelegate, @unchecked Sendable {
+final class DynamicFaviconFetcher: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     static let shared = DynamicFaviconFetcher()
 
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.urlCredentialStorage = nil
+        config.urlCache = nil
         config.timeoutIntervalForRequest = 1.5
         config.timeoutIntervalForResource = 2.0
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
@@ -65,11 +69,38 @@ final class DynamicFaviconFetcher: NSObject, URLSessionDelegate, @unchecked Send
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
         // Accept self-signed certificates on localhost (e.g. Syncthing, local dev HTTPS)
-        if let trust = challenge.protectionSpace.serverTrust {
+        if FaviconPolicy.allowsSelfSignedCertificate(host: challenge.protectionSpace.host),
+           let trust = challenge.protectionSpace.serverTrust {
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
             completionHandler(.performDefaultHandling, nil)
         }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        guard let origin = task.originalRequest?.url, let destination = request.url,
+              FaviconPolicy.isSameOrigin(destination, as: origin) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
+    }
+
+    private func boundedData(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        let limit = 2 * 1024 * 1024
+        guard response.expectedContentLength <= Int64(limit) else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < limit else { throw URLError(.dataLengthExceedsMaximum) }
+            data.append(byte)
+        }
+        return (data, response)
     }
 
     /// Loopback hosts to try for a listener, derived from what it actually binds to:
@@ -98,7 +129,7 @@ final class DynamicFaviconFetcher: NSObject, URLSessionDelegate, @unchecked Send
                 req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", forHTTPHeaderField: "User-Agent")
 
                 do {
-                    let (data, response) = try await session.data(for: req)
+                    let (data, response) = try await boundedData(for: req)
                     if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                        let html = String(data: data, encoding: .utf8) {
                         for iconURL in extractIconURLs(from: html, base: rootURL) {
@@ -127,7 +158,7 @@ final class DynamicFaviconFetcher: NSObject, URLSessionDelegate, @unchecked Send
         var req = URLRequest(url: url)
         req.setValue(host, forHTTPHeaderField: "Host")
         do {
-            let (data, response) = try await session.data(for: req)
+            let (data, response) = try await boundedData(for: req)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
             return NSImage(data: data)
         } catch {
@@ -136,7 +167,9 @@ final class DynamicFaviconFetcher: NSObject, URLSessionDelegate, @unchecked Send
     }
 
     private func extractIconURLs(from html: String, base: URL) -> [URL] {
-        IconLinkParser.hrefs(in: html).compactMap { URL(string: $0, relativeTo: base)?.absoluteURL }
+        IconLinkParser.hrefs(in: html)
+            .compactMap { URL(string: $0, relativeTo: base)?.absoluteURL }
+            .filter { FaviconPolicy.isSameOrigin($0, as: base) }
     }
 }
 
@@ -614,3 +647,4 @@ struct ProcessIconView: View {
         .frame(width: size, height: size)
     }
 }
+
