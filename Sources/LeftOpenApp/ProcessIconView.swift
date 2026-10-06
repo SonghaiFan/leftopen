@@ -120,6 +120,7 @@ final class DynamicFaviconFetcher: NSObject, URLSessionTaskDelegate, @unchecked 
         return hosts.isEmpty ? ["127.0.0.1"] : hosts
     }
 
+    @MainActor
     func fetchFavicon(port: Int, hosts: [String] = ["127.0.0.1"]) async -> NSImage? {
         for host in hosts {
             for scheme in ["http", "https"] {
@@ -154,6 +155,7 @@ final class DynamicFaviconFetcher: NSObject, URLSessionTaskDelegate, @unchecked 
         return nil
     }
 
+    @MainActor
     private func fetchImage(url: URL, host: String) async -> NSImage? {
         var req = URLRequest(url: url)
         req.setValue(host, forHTTPHeaderField: "Host")
