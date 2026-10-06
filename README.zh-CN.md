@@ -133,3 +133,18 @@ LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 ## 许可证
 
 [MIT License](LICENSE)
+
+
+## Portless 固定项目地址
+
+端口详情里的「固定项目地址 · Portless」会读取 `~/.portless` 中的路由，匹配仍在监听的代理与服务进程，显示固定网址并支持打开、复制。支持 HTTP/HTTPS、自定义代理端口和多个域名；自定义 `PORTLESS_STATE_DIR` 请在详情的 Portless 设置里填入对应目录。读取失败不会影响端口扫描。
+
+可以按项目目录保存别名，输入启动命令后复制，例如：
+
+```bash
+cd '/path/to/myapp' && portless run --name myapp next dev
+```
+
+先用 `npm install -g portless` 安装，再在终端执行生成的命令。保存别名不会为已运行的服务创建路由；网址以真实路由和代理配置为准。LeftOpen 只读 Portless 状态，不修改它的路由、证书或系统配置。此集成基于 Portless 当前的 pre-1.0 文件格式，上游改变格式时可能需要更新适配器。
+
+[Portless 文档](https://github.com/vercel-labs/portless)
