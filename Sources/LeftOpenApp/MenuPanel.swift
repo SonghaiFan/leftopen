@@ -16,6 +16,9 @@ struct MenuPanel: View {
     @State private var evidenceExpanded = false
     @State private var limitationsExpanded = false
     @State private var webURLs: [String: URL] = [:]
+    @State private var portlessURLs: [String: [URL]] = [:]
+    @State private var portlessError: String?
+    @AppStorage("leftopen.portlessStateDirectory") private var portlessDirectory = "~/.portless"
     /// Sections the user folded or unfolded; the rest follow `defaultExpanded(_:)`.
     @State private var sectionExpansion: [PortCategory: Bool] = [:]
     private let expandAllSections: Bool
@@ -34,7 +37,7 @@ struct MenuPanel: View {
 
     private var webProbeIdentity: [String] {
         let minute = Int((model.lastRefresh?.timeIntervalSince1970 ?? 0) / 60)
-        return [String(minute)] + model.visible.activities.map { activity in
+        return [String(minute), String(model.lastRefresh?.timeIntervalSince1970 ?? 0), portlessDirectory] + model.visible.activities.map { activity in
             "\(activity.id):\(activity.listener.addresses.sorted().joined(separator: ","))"
         }.sorted()
     }
@@ -44,6 +47,21 @@ struct MenuPanel: View {
     private func detectWebServices() async {
         let activities = model.visible.activities
         webURLs = [:]
+        portlessURLs = [:]
+        portlessError = nil
+        let snapshot = model.snapshot.activities
+        let directory = portlessDirectory
+        do {
+            let urls = try await Task.detached(priority: .utility) {
+                try Portless.readURLs(directory: directory, activities: snapshot)
+            }.value
+            guard !Task.isCancelled else { return }
+            portlessURLs = urls
+        } catch {
+            guard !Task.isCancelled else { return }
+            portlessError = L("Portless state could not be read: \(error.localizedDescription)",
+                              "无法读取 Portless 状态：\(error.localizedDescription)")
+        }
         for start in stride(from: 0, to: activities.count, by: 4) {
             guard !Task.isCancelled else { return }
             let batch = Array(activities[start..<min(start + 4, activities.count)])
@@ -712,6 +730,13 @@ struct MenuPanel: View {
                         infoRow(L("Web URL", "网址"), webURL.absoluteString)
                     }
                 }
+
+                Divider()
+                PortlessProjectView(project: activity.projectMarker,
+                                    urls: portlessURLs[activity.id] ?? [], readError: portlessError,
+                                    otherHostnames: Set(portlessURLs.filter { $0.key != activity.id }
+                                        .values.flatMap { $0 }.compactMap(\.host))
+                                        .subtracting(Set((portlessURLs[activity.id] ?? []).compactMap(\.host))))
 
                 Divider()
                 DisclosureGroup(L("Owner evidence", "归属证据"), isExpanded: $evidenceExpanded) {
@@ -1586,3 +1611,4 @@ enum MenuBarDoor {
         return image
     }
 }
+
