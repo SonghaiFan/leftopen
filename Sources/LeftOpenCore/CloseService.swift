@@ -147,6 +147,11 @@ public enum CloseService {
               activity.process.executablePath == plan.executablePath else {
             throw CloseError(L("PID \(plan.pid) changed identity since the preview; nothing was signalled.", "PID \(plan.pid) 在确认后身份已变化，未发送任何信号。"))
         }
+        let ports = Set(activities.filter { $0.process.pid == plan.pid }.map(\.listener.port))
+        guard ports.isSubset(of: Set(plan.otherPorts + [plan.port])) else {
+            throw CloseError(L("This process opened additional ports. Try a gentle close again to review them.",
+                               "此进程新增了监听端口，请重新尝试轻轻关闭并查看影响范围。"))
+        }
         try validate(activity: activity, currentUID: Int32(getuid()), currentPID: getpid(),
                      safetyProtectionEnabled: plan.safetyProtectionEnabled)
     }
@@ -167,11 +172,7 @@ public enum CloseService {
         }
         let plan = offer.plan
         try verify(plan: plan, activities: activities, freshStartTime: freshStartTime)
-        let ports = Set(activities.filter { $0.process.pid == plan.pid }.map(\.listener.port))
-        guard ports.isSubset(of: Set(plan.otherPorts + [plan.port])) else {
-            throw CloseError(L("This process opened additional ports. Try a gentle close again to review them.",
-                               "此进程新增了监听端口，请重新尝试轻轻关闭并查看影响范围。"))
-        }
+
     }
 
     // Injectable system boundaries let tests verify signal ordering without killing real processes.
@@ -264,3 +265,4 @@ public enum CloseService {
         return value.isEmpty ? nil : value
     }
 }
+
