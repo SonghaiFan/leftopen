@@ -25,6 +25,6 @@ jobs:
       - name: Test Swift package
         run: swift test
       - name: Build app and CLI
-        run: bash Scripts/build-app.sh
+        run: zsh Scripts/build-app.sh
         env:
           LEFTOPEN_OUTPUT_DIR: dist/ci
