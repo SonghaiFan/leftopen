@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Test release scripts
+        run: python3 -m unittest discover -s Tests/ReleaseTests
+      - name: Test Swift package
+        run: swift test
+      - name: Build app and CLI
+        run: bash Scripts/build-app.sh
+        env:
+          LEFTOPEN_OUTPUT_DIR: dist/ci
