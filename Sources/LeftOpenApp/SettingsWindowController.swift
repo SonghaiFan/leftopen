@@ -121,7 +121,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
         item.label = pane.title
         item.paletteLabel = pane.title
         item.toolTip = pane.title
-        item.image = NSImage(systemSymbolName: pane.symbol, accessibilityDescription: pane.title)
+        // Same size and weight as the panel's footer icons.
+        item.image = NSImage(systemSymbolName: pane.symbol, accessibilityDescription: pane.title)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
         item.target = self
         item.action = #selector(selectPane(_:))
         return item
