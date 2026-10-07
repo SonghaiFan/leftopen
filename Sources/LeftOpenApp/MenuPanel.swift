@@ -470,14 +470,7 @@ struct MenuPanel: View {
                                 }
                             }
                             if expanded {
-                                VStack(spacing: 0) {
-                                    groupRows(section.groups)
-                                }
-                                .padding(4)
-                                .background(AppAppearance.groupedSurface,
-                                            in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
-                                .padding(.horizontal, AppAppearance.contentInset)
-                                .padding(.bottom, 6)
+                                groupRows(section.groups)
                             }
                         }
                         if !model.snapshot.limitations.isEmpty {
@@ -505,11 +498,9 @@ struct MenuPanel: View {
 
     @ViewBuilder private var savedProjects: some View {
         if settings.showProjectDock && !dockProjects.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L("Projects", "项目")).font(AppAppearance.sectionTitle)
-                    Spacer()
-                    if fixed.isWorking { ProgressView().controlSize(.small) }
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader(L("Projects", "项目")) {
+                    if fixed.isWorking { ProgressView().controlSize(.mini) }
                 }
                 ProjectShortcutGrid() {
                         ForEach(dockProjects, id: \.id) { binding in
@@ -553,8 +544,7 @@ struct MenuPanel: View {
                     if let id = shortcutDrag.id, let center = shortcutDrag.center,
                        let binding = fixed.bindings.first(where: { $0.id == id }) {
                         shortcutLabel(binding)
-                            .padding(4)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                             .scaleEffect(shortcutDrag.settling || reduceMotion ? 1 : 1.07)
                             .shadow(color: .black.opacity(shortcutDrag.settling ? 0.06 : 0.18), radius: 6, y: 3)
                             .position(center)
@@ -563,13 +553,13 @@ struct MenuPanel: View {
                 }
                 .coordinateSpace(name: "projectDock")
                 .onPreferenceChange(ProjectShortcutFrames.self) { shortcutFrames = $0 }
-                if let error = fixed.error { Text(error).font(AppAppearance.secondary).foregroundStyle(.secondary) }
+                .padding(.horizontal, AppAppearance.contentInset - 4)
+                if let error = fixed.error {
+                    Text(error).font(AppAppearance.secondary).foregroundStyle(.secondary)
+                        .padding(.horizontal, AppAppearance.contentInset)
+                }
             }
-            .padding(12)
-            .background(AppAppearance.groupedSurface,
-                        in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
-            .padding(.horizontal, AppAppearance.contentInset)
-            .padding(.vertical, 8)
+            .padding(.bottom, 4)
             .onChange(of: dockProjects.isEmpty) {
                 if dockProjects.isEmpty { shortcutDrag.clear() }
             }
@@ -580,29 +570,33 @@ struct MenuPanel: View {
     @ViewBuilder private func shortcutLabel(_ binding: FixedAddressBinding) -> some View {
         let activity = binding.resolve(in: model.snapshot.activities)
         let running = fixed.urls[binding.id] != nil
-        VStack(spacing: 6) {
+        let size = ProjectShortcutGridMetrics.iconSize
+        HStack(spacing: 5) {
             Group {
                 if let activity {
-                    ProcessIconView(activity: activity, size: 36)
+                    ProcessIconView(activity: activity, size: size)
                 } else if let path = ProcessIconResolver.projectIconPath(in: binding.projectRoot) {
                     Image(nsImage: ProcessIconCache.shared.image(forFile: path))
-                        .resizable().scaledToFit().frame(width: 36, height: 36)
-                        .clipShape(RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+                        .resizable().scaledToFit().frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
                 } else {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: binding.projectRoot))
-                        .resizable().scaledToFit().frame(width: 36, height: 36)
+                        .resizable().scaledToFit().frame(width: size, height: size)
                 }
             }
+            // Stopped projects fade back; running ones stay at full strength.
+            .opacity(running || activity != nil ? 1 : 0.45)
             Text(binding.name)
                 .font(AppAppearance.secondary)
+                .foregroundStyle(running ? .primary : .secondary)
                 .lineLimit(1).truncationMode(.middle)
-                .frame(width: 68)
-            Circle()
-                .fill(running ? Color.accentColor : Color.clear)
-                .overlay(Circle().strokeBorder(running ? Color.clear : Color.secondary, lineWidth: 1))
-                .frame(width: 4, height: 4)
+                .frame(maxWidth: 120, alignment: .leading)
+                .fixedSize()
         }
-        .frame(width: 68, height: ProjectShortcutGridMetrics.rowHeight)
+        .padding(.leading, 4)
+        .padding(.trailing, 7)
+        .frame(height: ProjectShortcutGridMetrics.rowHeight)
+        .background(AppAppearance.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
 
         .contentShape(Rectangle())
     }
@@ -632,15 +626,16 @@ struct MenuPanel: View {
         .font(AppAppearance.body)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(AppAppearance.groupedSurface, in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+        .background(AppAppearance.fill, in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
         .padding(.horizontal, AppAppearance.contentInset)
         .padding(.vertical, 8)
     }
 
     private func sectionHeader<Accessory: View>(_ title: String, @ViewBuilder accessory: () -> Accessory) -> some View {
         HStack(spacing: 5) {
-            Text(title)
-                .font(AppAppearance.sectionTitle)
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
             Spacer()
             accessory()
         }
@@ -871,7 +866,7 @@ struct MenuPanel: View {
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AppAppearance.groupedSurface, in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+                    .background(AppAppearance.fill, in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
                 }
 
                 Divider()
@@ -1375,7 +1370,6 @@ private struct PortRow: View {
                     if let port {
                         Text(String(port))
                             .font(.system(.callout, design: .monospaced).weight(.semibold))
-                            .foregroundStyle(fixedName == nil ? Color.primary : Color.accentColor)
                         if fixedName != nil {
                             Image(systemName: "link")
                                 .font(.system(size: 10, weight: .semibold))
@@ -1445,7 +1439,7 @@ private struct PortRow: View {
             // Opaque, so the action layer is only seen where the card has moved off it.
             let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
             shape
-                .fill(AppAppearance.groupedSurface)
+                .fill(AppAppearance.surface)
                 .overlay(shape.fill(Color.primary.opacity(isHovered || isLifted ? 0.06 : 0)))
                 .shadow(color: .black.opacity(isLifted ? 0.14 : 0), radius: 1.5, y: 0.5)
         }
@@ -1901,7 +1895,8 @@ enum MenuBarDoor {
 
 
 private enum ProjectShortcutGridMetrics {
-    static let rowHeight: CGFloat = 76
+    static let iconSize: CGFloat = 16
+    static let rowHeight: CGFloat = 24
 }
 
 /// Shortcuts wrap inside the panel and scroll with the surrounding port list.
@@ -1909,8 +1904,49 @@ struct ProjectShortcutGrid<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-            content()
+        ShortcutFlowLayout(spacing: 6) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Lays chips out left to right, wrapping onto new lines as the width runs out.
+private struct ShortcutFlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        return CGSize(width: rows.map(\.width).max() ?? 0,
+                      height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
         }
+    }
+
+    private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = [Row()]
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].indices.isEmpty, rows[rows.count - 1].width + spacing + size.width > width {
+                rows.append(Row())
+            }
+            var row = rows[rows.count - 1]
+            row.width += (row.indices.isEmpty ? 0 : spacing) + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            rows[rows.count - 1] = row
+        }
+        return rows
     }
 }
