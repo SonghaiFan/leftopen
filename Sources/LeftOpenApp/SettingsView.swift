@@ -26,26 +26,32 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            Form {
+        Form {
+            switch navigation.section {
+            case .general:
                 generalSettings
-                addressSettings.id(SettingsSection.projects)
-                behaviorSettings
+                monitoringSettings
+            case .projects:
+                addressSettings
+            case .behavior:
+                closingSettings
+                soundSettings
+            case .about:
                 updateSettings
-                aboutSettings.id(SettingsSection.about)
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .background(AppAppearance.surface)
-            .controlSize(.small)
-            .frame(width: 380)
-            .fixedSize(horizontal: false, vertical: true)
-            .onAppear { proxy.scrollTo(navigation.section, anchor: .top) }
-            .onChange(of: navigation.section) {
-                withAnimation(motion) { proxy.scrollTo(navigation.section, anchor: .top) }
+                aboutSettings
             }
         }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(AppAppearance.surface)
+        .controlSize(.small)
+        .frame(width: 380)
+        .fixedSize(horizontal: false, vertical: true)
         .task { await fixed.refreshAddressSetup() }
+        .onChange(of: navigation.section) {
+            volumePreviewTask?.cancel()
+            if navigation.section == .projects { Task { await fixed.refreshAddressSetup() } }
+        }
         .onDisappear { volumePreviewTask?.cancel() }
     }
 
@@ -58,28 +64,40 @@ struct SettingsView: View {
                 get: { launchAtLogin.isEnabled },
                 set: { _ in launchAtLogin.toggle() }
             ))
-            Picker(L("Refresh", "刷新"), selection: $settings.refreshInterval) {
-                ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
-            }
-            .help(L("How often LeftOpen scans for listening ports.", "LeftOpen 扫描监听端口的频率。"))
-            Picker(L("Menu bar count", "菜单栏数字"), selection: $settings.menuBarBadgeMode) {
-                ForEach(MenuBarBadgeMode.allCases) { Text($0.title).tag($0) }
-            }
-            .help(L("What the number next to the menu bar door counts.", "菜单栏图标旁的数字显示什么。"))
         } header: {
             Text(L("General", "通用"))
         }
     }
 
-    private var behaviorSettings: some View {
+    private var monitoringSettings: some View {
+        Section {
+            Picker(L("Refresh", "刷新"), selection: $settings.refreshInterval) {
+                ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
+            }
+            Picker(L("Menu bar count", "菜单栏数字"), selection: $settings.menuBarBadgeMode) {
+                ForEach(MenuBarBadgeMode.allCases) { Text($0.title).tag($0) }
+            }
+        } header: {
+            sectionHeader(L("Port Monitoring", "端口监控"),
+                help: L("How often LeftOpen scans and what the menu bar shows.", "设置 LeftOpen 的扫描频率和菜单栏显示内容。"))
+        }
+    }
+
+    private var closingSettings: some View {
         Section {
             Toggle(L("Protect apps and system services", "保护 App 和系统服务"),
                    isOn: $settings.safetyProtectionEnabled.animation(motion))
-                .help(settings.safetyProtectionEnabled
-                    ? L("Prevents closing app-owned, macOS, and automatically restarted service ports. Project servers remain closable.",
-                        "阻止关闭属于 App、macOS 和会自动重启的服务端口；项目服务器仍可关闭。")
-                    : L("Protection is off. LeftOpen will let you try to close any port owned by your user. Process identity is still rechecked before SIGTERM.",
-                        "保护已关闭。LeftOpen 将允许尝试关闭当前用户的任何端口；发送 SIGTERM 前仍会重新确认进程身份。"))
+        } header: {
+            sectionHeader(L("Closing Safety", "关闭安全保护"), help: settings.safetyProtectionEnabled
+                ? L("Prevents closing app-owned, macOS, and automatically restarted service ports. Project servers remain closable.",
+                    "阻止关闭属于 App、macOS 和会自动重启的服务端口；项目服务器仍可关闭。")
+                : L("Protection is off. LeftOpen will let you try to close any port owned by your user. Process identity is still rechecked before SIGTERM.",
+                    "保护已关闭。LeftOpen 将允许尝试关闭当前用户的任何端口；发送 SIGTERM 前仍会重新确认进程身份。"))
+        }
+    }
+
+    private var soundSettings: some View {
+        Section {
             Toggle(L("Play sounds when ports change", "端口变化时播放提示音"),
                    isOn: $settings.soundEffectsEnabled)
             if settings.soundEffectsEnabled {
@@ -102,7 +120,7 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text(L("Behavior", "行为"))
+            Text(L("Sounds", "声音"))
         }
     }
 
