@@ -57,8 +57,27 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 - **Grouped by who started them.** Dev Servers (from a project, terminal, editor or agent), Background Services (launchd: brew services, login items), Apps and System. The group is also how a port is closed for good, and each one says so: SIGTERM for dev servers, `brew services stop …` for services launchd would restart, quitting the app for apps.
 - **Closes gently first.** Sends `SIGTERM` and re-checks process identity. If a single-process close still leaves it listening after five seconds, that process is marked and the warning explains that closing it again within two minutes sends `SIGKILL`. The second click or swipe is the deliberate force-close action; existing safety protections and identity checks still apply.
 - **Local vs LAN.** Tells apart ports bound to `127.0.0.1` from ones on `0.0.0.0` or a LAN address.
-- **Nothing running in the background.** Native SwiftUI `MenuBarExtra`. No daemon, no Dock icon, no telemetry. The only request that leaves this Mac is a daily check of the latest GitHub release, which you can turn off in Settings.
+- **Quiet by default.** Native SwiftUI `MenuBarExtra`. No Dock icon, no telemetry, and no background service unless you opt into fixed addresses. The only request that leaves this Mac is a daily check of the latest GitHub release, which you can turn off in Settings.
+- **Fixed project addresses.** Give a dev server a stable `https://myapp.localhost` URL that follows it across port changes, powered by bundled [Portless](https://github.com/vercel-labs/portless). See [below](#fixed-project-addresses).
 - **Same engine in the terminal.** The app ships a `leftopen` CLI with identical inference and safety rules.
+
+---
+
+## Fixed project addresses
+
+Dev servers move between ports; their address doesn't have to. LeftOpen bundles [Portless](https://github.com/vercel-labs/portless) 0.15.7 and Node 24.14.0, so there's nothing extra to install.
+
+1. **One-time setup:** **Settings → Projects → Local project addresses → Set up once.** macOS asks for authorization to trust a local CA, install a loopback-only HTTPS service on port 443, and manage exact `/etc/hosts` entries. Only this Settings button ever asks; project actions and background scans never do.
+2. **Per project:** start the project as usual, then click **Enable fixed address** in its port details. It's reachable at `https://myapp.localhost`.
+
+How it behaves:
+
+- **Verified before forwarding.** LeftOpen checks the project root, executable, working directory, hashed command identity and live listener before following a port change. Ambiguous or unrelated listeners, HTTPS-only upstreams and non-web ports are never forwarded. If the dev server rejects the hostname, the details show why; project files are never edited.
+- **Start stopped projects.** Saved projects that aren't running show **Start** when they have a dev script, using Portless's own launcher (free-port allocation, framework arguments, worktree naming). LeftOpen never reconstructs commands from process arguments. Projects without a script offer **Open project**.
+- **Leases, not permanent rules.** Mappings for observed services use short leases that expire when LeftOpen stops scanning and restore on launch. Disabling an address doesn't stop the project. The HTTPS service stays installed across app quits; if port 443 is already taken, LeftOpen reports it instead of taking over.
+- **For agents and scripts:** `leftopen url [name|port|path]` prints verified addresses (`--json` for structured output), and `leftopen --json` includes `fixedURL` for matching services.
+
+Earlier HTTP addresses keep working; finish the HTTPS upgrade from the same Settings page. Portless (Apache-2.0) and Node ship with their licenses.
 
 ---
 
@@ -84,6 +103,9 @@ leftopen 3000
 
 # Open http://localhost:3000 in the default browser
 leftopen open 3000
+
+# Print a project's verified fixed address (e.g. https://myapp.localhost)
+leftopen url myapp
 
 # Close the process on a port (SIGTERM, asks first)
 leftopen close 3000
@@ -135,20 +157,3 @@ LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 ## License
 
 [MIT License](LICENSE)
-
-
-## Fixed project addresses
-
-Complete **Settings → Projects → Local project addresses → Set up once** first. Then start your project normally and click **Enable fixed address** in its port details. LeftOpen bundles Portless and Node; no separate Portless installation or terminal commands are needed. New addresses use `https://myapp.localhost`. The Settings page explains why the first setup requests macOS authorization to trust a local CA, install a dedicated loopback service on port 443, and manage exact hosts entries. Later projects use that service without another prompt. Only the Settings setup/repair button requests authorization. Project actions direct you there if needed; background scans never request authorization. macOS can show separate administrator and certificate-trust dialogs during this one-time setup.
-
-Previously enabled HTTP addresses keep working; **Settings → Projects → Local project addresses** completes the HTTPS upgrade. Keep LeftOpen open for observed services: mappings use short observation leases, expire when scans stop, and restore on launch. Disabling an address does not stop the project. The dedicated HTTPS service remains installed across app quits; Portless-started sessions retain their own lifecycle. Port 443 conflicts are reported without taking over another service. External Portless state and service labels are separate.
-
-Saved projects appear as **Not running** with a **Start** button when an existing development script is available. This uses Portless's actual launcher: free-port allocation, framework arguments, project configuration, worktree naming, and workspace discovery. LeftOpen never reconstructs a startup command from process arguments or changes project files. Projects without a configured script offer **Open project** instead. Runtime/package-manager dependencies belonging to the project are still required.
-
-LeftOpen verifies the project root, executable, working directory, hashed command identity and live listener before following port changes. Ambiguous or unrelated listeners are not forwarded. HTTPS-only upstreams and non-web ports cannot be enabled. A development server that rejects the hostname reports an inline error; project configuration is not edited automatically.
-
-For agents and scripts, `leftopen url [name|port|path]` prints current verified addresses; add `--json` for structured output. `leftopen --json` includes `fixedURL` for matching services. Both read the same short-lived catalog as the app and recheck live listener identity. External addresses remain available under Address options.
-
-The app includes Portless 0.15.7 (Apache-2.0) and Node 24.14.0 with their licenses. Builds verify pinned archive checksums and bundle both Mac architectures. Release signing must also sign the nested Node binaries with their JIT entitlement.
-
-[Portless documentation](https://github.com/vercel-labs/portless)

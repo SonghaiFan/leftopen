@@ -719,6 +719,7 @@
           <article class="essential"><h3 lang="zh">端口属于谁</h3><h3 lang="en">Know the owner</h3><p lang="zh">从进程、工作目录和项目标记推断归属，避免只看到一个模糊的 <code>node</code>。</p><p lang="en">It uses the process, working directory and project markers, so you see more than a generic <code>node</code>.</p></article>
           <article class="essential"><h3 lang="zh">哪里可见</h3><h3 lang="en">Know the scope</h3><p lang="zh">区分只在本机监听的服务，以及可能暴露到局域网的端口。</p><p lang="en">It distinguishes local-only services from ports that may be visible on your LAN.</p></article>
           <article class="essential"><h3 lang="zh">该关什么</h3><h3 lang="en">Close what you choose</h3><p lang="zh">可关闭的服务在前；系统服务和应用仍可查看，但不会被 LeftOpen 关闭。</p><p lang="en">Closable services come first. System services and apps remain visible, but LeftOpen will not close them.</p></article>
+          <article class="essential"><h3 lang="zh">固定地址</h3><h3 lang="en">Keep one address</h3><p lang="zh">为项目启用 <code>https://myapp.localhost</code>，端口变化后自动跟随。内置 Portless，只需在设置中授权一次。</p><p lang="en">Give a project <code>https://myapp.localhost</code> that follows it across port changes. Portless is built in; authorize once in Settings.</p></article>
         </div>
       </section>
       <section class="safety">
@@ -733,6 +734,7 @@
           <div class="commands">
             <div class="command"><code>leftopen</code><span lang="zh">列出监听端口</span><span lang="en">List listening ports</span></div>
             <div class="command"><code>leftopen 3000</code><span lang="zh">解释一个端口</span><span lang="en">Explain one port</span></div>
+            <div class="command"><code>leftopen url myapp</code><span lang="zh">查看固定项目地址</span><span lang="en">Print a fixed project address</span></div>
             <div class="command"><code>leftopen close 3000</code><span lang="zh">确认后请求退出</span><span lang="en">Request an exit after confirmation</span></div>
           </div>
         </div>
