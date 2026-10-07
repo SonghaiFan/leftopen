@@ -18,8 +18,8 @@
 
   <br />
   <picture>
-    <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
-    <img src="assets/preview.png" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起" width="375" />
+    <source srcset="assets/preview-zh-dark.png" media="(prefers-color-scheme: dark)">
+    <img src="assets/preview-zh.png" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起" width="375" />
   </picture>
   <br /><br />
 </div>
