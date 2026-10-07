@@ -135,16 +135,18 @@ LEFTOPEN_OUTPUT_DIR=dist/dev Scripts/build-app.sh
 [MIT License](LICENSE)
 
 
-## Portless 固定项目地址
+## 固定项目地址
 
-端口详情里的「固定项目地址 · Portless」会读取 `~/.portless` 中的路由，匹配仍在监听的代理与服务进程，显示固定网址并支持打开、复制。支持 HTTP/HTTPS、自定义代理端口和多个域名；自定义 `PORTLESS_STATE_DIR` 请在详情的 Portless 设置里填入对应目录。读取失败不会影响端口扫描。
+先在 **设置 → 项目 → 本地项目地址 → 完成首次设置** 集中完成授权，再照常启动项目，在端口详情点击 **启用固定地址**。LeftOpen 内置 Portless 和 Node，无需另外安装 Portless 或使用终端。新地址为 `https://myapp.localhost`。设置页说明授权用途：通过 macOS 系统授权信任本地 CA、安装只监听本机的 443 地址服务，并管理精确的 hosts 条目；后续项目直接复用，不再重复授权。只有设置页的首次设置或修复按钮会触发授权。项目操作在需要时引导至设置，后台扫描不会弹出授权。macOS 可能在这轮首次设置中分别显示管理员和证书信任两个窗口。
 
-可以按项目目录保存别名，输入启动命令后复制，例如：
+已有 HTTP 地址继续可用，可在 **设置 → 项目 → 本地项目地址** 完成 HTTPS 升级。对于扫描到的服务，请保持 LeftOpen 运行：映射有短期有效时间，扫描停止后失效，下次打开 App 恢复。停用地址不会停止项目。HTTPS 后台服务在退出 App 后仍保留；由 Portless 启动的项目按其自身生命周期运行。443 被其他服务占用时显示原因，不抢占服务。外部 Portless 的状态目录与服务标识独立保留。
 
-```bash
-cd '/path/to/myapp' && portless run --name myapp next dev
-```
+已保存项目停止后显示 **未运行**，有现成开发脚本时提供 **启动**。直接使用 Portless 原有的启动能力：分配空闲端口、适配开发框架、读取项目配置、区分 worktree 和发现 workspace 服务。不从进程参数猜启动命令，不修改项目文件。没有配置脚本的项目显示 **打开项目**；项目自身依赖的运行时与包管理器仍需存在。
 
-先用 `npm install -g portless` 安装，再在终端执行生成的命令。保存别名不会为已运行的服务创建路由；网址以真实路由和代理配置为准。LeftOpen 只读 Portless 状态，不修改它的路由、证书或系统配置。此集成基于 Portless 当前的 pre-1.0 文件格式，上游改变格式时可能需要更新适配器。
+LeftOpen 根据项目目录、可执行文件、工作目录、参数摘要与当前监听进程确认映射。服务停止、归属不明确或无关进程占用端口时不转发。不支持仅 HTTPS 的上游服务或非 Web 端口。开发服务器拒绝新主机名时在详情内显示原因，不自动修改配置。
+
+Agent 与脚本可以用 `leftopen url [名称|端口|路径]` 查询实时确认的地址，加 `--json` 获取结构化结果。`leftopen --json` 为对应服务增加 `fixedURL`。App 与 CLI 共用有时效的地址目录，CLI 会再次核对当前进程。外部 Portless 地址仍可在「地址选项」查看。
+
+App 包含 Portless 0.15.7（Apache-2.0）和 Node 24.14.0 及对应许可证。构建校验固定下载摘要，包含两种 Mac 架构；发布签名同时为内置 Node 添加 JIT entitlement。
 
 [Portless 文档](https://github.com/vercel-labs/portless)

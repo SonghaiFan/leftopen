@@ -5,7 +5,7 @@ import Foundation
 /// a background service, inside Docker Desktop an app. So the category rests on who started the
 /// process, never on lists of program names or port numbers, and the row name says what it is.
 ///
-/// A process is classified as a whole, so all of its ports land in the same section.
+/// Verified editor previews are classified per listener; other sockets keep their host category.
 public enum PortCategory: String, CaseIterable, Sendable {
     case devServer = "dev-server"
     case background
@@ -26,8 +26,8 @@ public enum PortCategory: String, CaseIterable, Sendable {
     /// Where these ports come from and how to close them for good.
     public var hint: String {
         switch self {
-        case .devServer: L("Started from a project, terminal, editor or agent. Closing sends SIGTERM, and they stay closed.",
-                           "从项目、终端、编辑器或 agent 启动。关闭时发送 SIGTERM，关掉后不会自己回来。")
+        case .devServer: L("Started from a project, terminal, editor or agent. Editor-hosted previews are stopped in the editor; other servers close with SIGTERM.",
+                           "从项目、终端、编辑器或 agent 启动。编辑器内的预览请在编辑器中停止；其他服务通过 SIGTERM 关闭。")
         case .background: L("Run by launchd (brew services, login items). Stop the service, or launchd may start it again.",
                             "由 launchd 管理（brew services、登录项）。请停止对应服务，否则 launchd 可能会再次启动它。")
         case .app: L("Opened by a running app. Quit the app to free them.", "由正在运行的 App 打开。退出该 App 即可释放。")
@@ -42,12 +42,20 @@ public enum PortCategory: String, CaseIterable, Sendable {
         Dictionary(grouping: activities, by: \.process.pid).mapValues(classify)
     }
 
+    public static func byActivity(_ activities: [Activity]) -> [String: PortCategory] {
+        let hostCategories = byPID(activities.filter { $0.editorPreview == nil })
+        return Dictionary(uniqueKeysWithValues: activities.map {
+            ($0.id, $0.editorPreview != nil ? classify([$0]) : hostCategories[$0.process.pid] ?? .other)
+        })
+    }
+
     /// `activities` are the listeners of a single process. Checked from the owner that most
     /// constrains how the port can be closed down to the one that constrains it least.
     public static func classify(_ activities: [Activity]) -> PortCategory {
         guard let activity = activities.first else { return .other }
         if isSystem(activity) { return .system }
         if activity.launchdJob != nil { return .background }
+        if activities.allSatisfy({ $0.editorPreview != nil }) { return .devServer }
         if activity.applicationBundle?.direct == true { return .app }
         if activity.projectMarker != nil || startedFromShell(activity) || isOrphan(activity) { return .devServer }
         if activity.applicationBundle != nil { return .app }

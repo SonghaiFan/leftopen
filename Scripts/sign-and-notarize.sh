@@ -27,6 +27,12 @@ fi
 
 "${project_dir}/Scripts/verify-universal-app.sh" "$app_path"
 
+# Node needs JIT permission under the hardened runtime. Sign every nested executable first.
+for architecture in arm64 x64; do
+  codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" \
+    --entitlements "${project_dir}/Resources/Portless/node-entitlements.plist" \
+    "${app_path}/Contents/Resources/Portless/node-${architecture}"
+done
 # The CLI is nested code; signing the bundle also signs LeftOpenApp.
 codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "${app_path}/Contents/MacOS/leftopen"
 codesign --force --options runtime --timestamp --sign "$LEFTOPEN_APP_IDENTITY" "$app_path"

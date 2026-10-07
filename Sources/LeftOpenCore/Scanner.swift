@@ -265,7 +265,8 @@ public enum Scanner {
         let listeners = try scanListeners()
         let pids = Array(Set(listeners.map(\.pid))).sorted()
         let cwdByPID = try descriptorFacts(pids, "cwd")
-        let executableByPID = try descriptorFacts(pids, "txt")
+        let mappedPathsByPID = try descriptorPaths(pids, "txt")
+        let executableByPID = mappedPathsByPID.compactMapValues { $0.first }
         let argumentsByPID = commandArguments(pids)
         var limitations: [String] = []
         let processTable: [Int32: ProcessFact]
@@ -300,11 +301,22 @@ public enum Scanner {
             let project = process.cwd.flatMap { projects[$0] }
             let bundle = applicationBundle(for: process, parents: parents,
                 launchedPath: table?.executablePath, project: project)
-            let inference = inferOwner(process: process, project: project, bundle: bundle)
-            return Activity(listener: listener, process: process, parentChain: parents,
+            let preview = bundle?.direct == true
+                ? EditorPreview.detect(listener, mappedPaths: mappedPathsByPID[listener.pid] ?? []) : nil
+            let inference: OwnerInference
+            if let preview, project == nil {
+                inference = OwnerInference(label: preview.name, category: .service, confidence: "high",
+                    reason: L("Verified Live Server reload code on this listener, hosted by \(bundle?.name ?? "an editor"). Its project folder is unknown; the shared editor process remains protected.",
+                              "此端口已验证 Live Server 刷新代码，由 \(bundle?.name ?? "编辑器") 托管。项目目录未知；共享编辑器进程仍受保护。"))
+            } else {
+                inference = inferOwner(process: process, project: project, bundle: bundle)
+            }
+            var activity = Activity(listener: listener, process: process, parentChain: parents,
                 projectMarker: project, applicationBundle: bundle,
                 scope: listenerScope(listener.addresses), inference: inference,
                 launchdJob: launchdJobs[listener.pid] ?? process.ppid.flatMap { launchdJobs[$0] })
+            activity.editorPreview = preview
+            return activity
         }
         return ScanSnapshot(activities: activities, limitations: limitations)
     }
@@ -367,7 +379,11 @@ public enum Scanner {
     }
 
     private static func descriptorFacts(_ pids: [Int32], _ descriptor: String) throws -> [Int32: String] {
-        var results: [Int32: String] = [:]
+        try descriptorPaths(pids, descriptor).compactMapValues { $0.first }
+    }
+
+    private static func descriptorPaths(_ pids: [Int32], _ descriptor: String) throws -> [Int32: [String]] {
+        var results: [Int32: [String]] = [:]
         for start in stride(from: 0, to: pids.count, by: 100) {
             let chunk = pids[start..<min(start + 100, pids.count)]
             let output = try CommandRunner.output("/usr/sbin/lsof",
@@ -378,8 +394,8 @@ public enum Scanner {
                 guard let field = raw.first else { continue }
                 let value = String(raw.dropFirst())
                 if field == "p" { currentPID = Int32(value) }
-                if field == "n", let currentPID, results[currentPID] == nil {
-                    results[currentPID] = value
+                if field == "n", let currentPID {
+                    results[currentPID, default: []].append(value)
                 }
             }
         }

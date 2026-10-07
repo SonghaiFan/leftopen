@@ -77,6 +77,7 @@ public final class AppSettings: ObservableObject {
         static let checkForUpdates = "leftopen.checkForUpdates"
         static let safetyProtectionEnabled = "leftopen.safetyProtectionEnabled"
         static let soundEffectsEnabled = "leftopen.soundEffectsEnabled"
+        static let showProjectDock = "leftopen.showProjectDock"
         static let soundVolume = "leftopen.soundVolume"
     }
 
@@ -102,6 +103,10 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(soundEffectsEnabled, forKey: Keys.soundEffectsEnabled) }
     }
 
+    @Published public var showProjectDock: Bool {
+        didSet { defaults.set(showProjectDock, forKey: Keys.showProjectDock) }
+    }
+
     @Published public var soundVolume: Double {
         didSet { defaults.set(soundVolume, forKey: Keys.soundVolume) }
     }
@@ -118,6 +123,8 @@ public final class AppSettings: ObservableObject {
 
         let storedBadge = defaults.string(forKey: Keys.menuBarBadgeMode) ?? MenuBarBadgeMode.closable.rawValue
         self.menuBarBadgeMode = MenuBarBadgeMode(rawValue: storedBadge) ?? .closable
+
+        self.showProjectDock = defaults.object(forKey: Keys.showProjectDock) as? Bool ?? true
 
         self.checkForUpdates = defaults.object(forKey: Keys.checkForUpdates) as? Bool ?? true
 

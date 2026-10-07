@@ -13,6 +13,7 @@ if [[ -e "$app_path" ]]; then
 fi
 
 cd "$project_dir"
+python3 "${project_dir}/Scripts/prepare-portless-runtime.py"
 # Build both slices even when packaging on an Apple Silicon or Intel host.
 build_args=(-c release -debug-info-format none --disable-sandbox --arch arm64 --arch x86_64)
 swift build "${build_args[@]}"
@@ -43,6 +44,12 @@ else
   print -u2 "Missing generated resource bundle: ${resource_bundle}"
   exit 1
 fi
+mkdir -p "${app_path}/Contents/Resources/Portless"
+cp -R "${project_dir}/.build/portless-runtime/." "${app_path}/Contents/Resources/Portless/"
+for architecture in arm64 x64; do
+  codesign --force --sign - --entitlements "${project_dir}/Resources/Portless/node-entitlements.plist" \
+    "${app_path}/Contents/Resources/Portless/node-${architecture}"
+done
 plutil -replace CFBundleIdentifier -string "$bundle_id" "${app_path}/Contents/Info.plist"
 # Sign nested code before the bundle, which signs the main executable too.
 codesign --force --sign - "${app_path}/Contents/MacOS/leftopen"

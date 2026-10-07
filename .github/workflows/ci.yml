@@ -28,3 +28,10 @@ jobs:
         run: zsh Scripts/build-app.sh
         env:
           LEFTOPEN_OUTPUT_DIR: dist/ci
+      - name: Test embedded Portless engine
+        run: |
+          case "$(uname -m)" in
+            arm64) node_arch=arm64 ;;
+            *) node_arch=x64 ;;
+          esac
+          .build/portless-runtime/node-${node_arch} --test Tests/PortlessTests/*.test.mjs

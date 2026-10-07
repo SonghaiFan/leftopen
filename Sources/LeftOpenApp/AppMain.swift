@@ -114,6 +114,7 @@ final class MenuModel: ObservableObject {
     var hasOpenDoors: Bool { closablePortCount > 0 }
 
     init() {
+        _ = FixedAddressManager.shared
         Task { await refresh() }
         scheduleRefresh(AppSettings.shared.refreshInterval)
         settingsObserver = AppSettings.shared.$refreshInterval

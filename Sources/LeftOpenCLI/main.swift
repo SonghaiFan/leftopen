@@ -52,9 +52,9 @@ func printOverview(activities: [Activity]) {
     print(bold("\nLEFT OPEN"))
     print("\(cyan(String(portCount))) listening ports · \(processCount) processes · \(projectCount) projects · \(yellow(String(lanCount))) LAN-visible")
 
-    let categories = PortCategory.byPID(activities)
+    let categories = PortCategory.byActivity(activities)
     for category in PortCategory.allCases {
-        printSection(category.title.uppercased(), hint: category.hint, activities: activities.filter { categories[$0.process.pid] == category })
+        printSection(category.title.uppercased(), hint: category.hint, activities: activities.filter { categories[$0.id] == category })
     }
     print(dim("\nLOCAL = this Mac only · LAN = may be reachable from your local network\n"))
 }
@@ -196,6 +196,7 @@ func runOpen(port: Int, activities: [Activity]) {
 }
 
 func printJSON(snapshot: ScanSnapshot) {
+    let addresses = FixedAddressCatalog.read()?.verified(in: snapshot.activities) ?? []
     var list: [[String: Any]] = []
     for a in snapshot.activities {
         var item: [String: Any] = [
@@ -219,6 +220,9 @@ func printJSON(snapshot: ScanSnapshot) {
                 "reason": a.inference.reason
             ]
         ]
+        if let address = addresses.first(where: { $0.pid == a.process.pid && $0.port == a.listener.port }) {
+            item["fixedURL"] = address.url.absoluteString
+        }
         if let m = a.projectMarker {
             item["project"] = ["name": m.name, "root": m.root, "source": m.source]
         }
@@ -294,6 +298,7 @@ Usage:
   leftopen open <port>          Open http://localhost:<port> in default browser
   leftopen close <port>         Gracefully close the process listening on a port
   leftopen close --all-projects Gracefully close all dev project servers
+  leftopen url [name|port|path]  Get verified project addresses (also supports --json)
   leftopen --json               Print machine-readable output
 
 Options:
@@ -326,6 +331,24 @@ do {
 } catch {
     print("\(red("ERROR")) Scan failed: \(error.localizedDescription)")
     exit(1)
+}
+
+if args.first == "url" {
+    let selectors = args.dropFirst().filter { !$0.hasPrefix("--") }
+    guard selectors.count <= 1 else { fputs("Usage: leftopen url [name|port|path] [--json]\n", stderr); exit(1) }
+    let entries = (FixedAddressCatalog.read()?.verified(in: snapshot.activities) ?? []).filter { entry in
+        guard let selector = selectors.first else { return true }
+        return entry.binding.name == selector || String(entry.port) == selector || entry.binding.projectRoot == selector
+    }
+    if args.contains("--json") {
+        let rows = entries.map { ["name": $0.binding.name, "url": $0.url.absoluteString,
+                                "project": $0.binding.projectRoot, "port": $0.port, "pid": $0.pid] as [String: Any] }
+        let data = try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
+        print(String(decoding: data, as: UTF8.self))
+    } else {
+        for entry in entries { print(entry.url.absoluteString) }
+    }
+    exit(entries.isEmpty ? 1 : 0)
 }
 
 if args.contains("--json") {

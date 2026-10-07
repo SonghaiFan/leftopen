@@ -1,0 +1,7 @@
+Portless 0.15.7, copyright Vercel Inc., licensed under Apache-2.0.
+LeftOpen modifies the bundled CLI and hosts module:
+- separate launchd label and hosts-file markers, leaving external Portless alone;
+- expose a read-only project-info command using upstream inference and config;
+- expire native-observed routes and recheck owner liveness on every request.
+Proxying, certificates, HTTP/2, WebSockets, project launch, worktree naming,
+framework port injection, and service management remain upstream Portless implementations.

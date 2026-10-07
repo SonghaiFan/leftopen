@@ -6,9 +6,11 @@ struct MenuPanel: View {
     @ObservedObject var model: MenuModel
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var updates = UpdateChecker.shared
-    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var fixed = FixedAddressManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
+    @StateObject private var shortcutDrag = ShortcutDragState()
+    @State private var shortcutFrames: [String: CGRect] = [:]
     @State private var expandedGroupIDs: Set<String> = []
     /// How many of each unfolded group's extra rows are currently shown; stepped one at a time.
     @State private var revealedCounts: [String: Int] = [:]
@@ -57,6 +59,11 @@ struct MenuPanel: View {
             }.value
             guard !Task.isCancelled else { return }
             portlessURLs = urls
+            if let internalURLs = try? await Task.detached(priority: .utility, operation: {
+                try Portless.readURLs(directory: PortlessService.directory.path, activities: snapshot)
+            }).value {
+                for (id, addresses) in internalURLs { portlessURLs[id, default: []] += addresses }
+            }
         } catch {
             guard !Task.isCancelled else { return }
             portlessError = L("Portless state could not be read: \(error.localizedDescription)",
@@ -99,10 +106,10 @@ struct MenuPanel: View {
     /// for. Categories are judged on the full scan, so a search never moves a process between
     /// sections; within a section, closable processes come first.
     private var sections: [(category: PortCategory, groups: [ListenerGroup])] {
-        let categories = PortCategory.byPID(model.snapshot.activities)
+        let categories = PortCategory.byActivity(model.snapshot.activities)
         let groups = listenerGroups(from: filteredActivities)
         return PortCategory.allCases.compactMap { category in
-            let members = groups.filter { (categories[$0.primary.process.pid] ?? .other) == category }
+            let members = groups.filter { (categories[$0.primary.id] ?? .other) == category }
             let ordered = members.filter {
                 $0.closeTarget(safetyProtectionEnabled: settings.safetyProtectionEnabled) != nil
             } + members.filter {
@@ -124,7 +131,7 @@ struct MenuPanel: View {
         var groups: [String: [Activity]] = [:]
         var orderedIDs: [String] = []
         for activity in activities {
-            let id = "pid:\(activity.process.pid):\(activity.process.executablePath ?? activity.process.command)"
+            let id = activity.listenerGroupID
             if groups[id] == nil { orderedIDs.append(id) }
             groups[id, default: []].append(activity)
         }
@@ -154,7 +161,7 @@ struct MenuPanel: View {
         reduceMotion ? .easeInOut(duration: 0.2) : .snappy(duration: 0.32)
     }
 
-    private var panelBackground: Color { panelSurface(colorScheme) }
+    private var panelBackground: Color { AppAppearance.surface }
 
     private func goBack() {
         if model.pendingBatchPlans != nil {
@@ -198,6 +205,40 @@ struct MenuPanel: View {
     private func showDetails(_ activity: Activity) {
         evidenceExpanded = false
         model.selectedActivityID = activity.id
+    }
+
+    private func fixedAddressAction(for activity: Activity) -> (() -> Void)? {
+        let binding = fixed.binding(for: activity)
+        guard !fixed.isWorking,
+              binding != nil || (activity.projectMarker != nil && activity.process.executablePath != nil &&
+                activity.process.uid == Int32(getuid()) && webURLs[activity.id]?.scheme == "http" &&
+                FixedAddressBinding.supportsLoopback(activity)) else { return nil }
+        return {
+            if let binding {
+                Task { await fixed.disable(binding) }
+            } else if !fixed.addressesReady {
+                SettingsWindowController.shared.show(section: .projects)
+            } else {
+                Task {
+                    await fixed.enable(activity, name: "")
+                    if fixed.error != nil { showDetails(activity) }
+                }
+            }
+        }
+    }
+
+    private func openProject(_ binding: FixedAddressBinding) {
+        if !fixed.addressesReady {
+            SettingsWindowController.shared.show(section: .projects)
+        } else if let url = fixed.urls[binding.id] {
+            NSWorkspace.shared.open(url)
+        } else {
+            Task {
+                await fixed.start(binding)
+                await model.refresh()
+                if let url = fixed.urls[binding.id] { NSWorkspace.shared.open(url) }
+            }
+        }
     }
 
     private func close(_ activity: Activity) {
@@ -296,7 +337,7 @@ struct MenuPanel: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(AppAppearance.body.weight(.medium))
                     }
                 }
                 .frame(width: 22, height: 22)
@@ -308,7 +349,7 @@ struct MenuPanel: View {
             .help(L("Refresh (⌘R)", "刷新 (⌘R)"))
             .accessibilityLabel(L("Refresh listening ports", "刷新监听端口"))
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, AppAppearance.contentInset)
         .padding(.vertical, 8)
     }
 
@@ -329,7 +370,7 @@ struct MenuPanel: View {
                             "局域网可见指绑定在非回环地址或通配地址上。本机访问通常没问题；其他设备需要通过这台 Mac 的局域网地址访问，并且要被防火墙放行。"))
             }
         }
-        .font(.caption)
+        .font(AppAppearance.secondary)
         .foregroundStyle(.secondary)
         .monospacedDigit()
         .accessibilityElement(children: .combine)
@@ -341,7 +382,7 @@ struct MenuPanel: View {
                 .foregroundStyle(notice.kind.color)
             VStack(alignment: .leading, spacing: 6) {
                 Text(notice.text)
-                    .font(.callout)
+                    .font(AppAppearance.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.isClosing {
@@ -349,7 +390,7 @@ struct MenuPanel: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, AppAppearance.contentInset)
         .padding(.vertical, 8)
         .background(notice.kind.color.opacity(0.08))
         .accessibilityElement(children: .contain)
@@ -393,8 +434,8 @@ struct MenuPanel: View {
         }
         .buttonStyle(QuietButtonStyle())
         .quietFocus()
-        .font(.caption)
-        .padding(.horizontal, 14)
+        .font(AppAppearance.secondary)
+        .padding(.horizontal, AppAppearance.contentInset)
         .padding(.vertical, 7)
     }
 
@@ -407,11 +448,12 @@ struct MenuPanel: View {
                 ProgressView(L("Scanning this Mac…", "正在扫描这台 Mac…"))
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredActivities.isEmpty {
+            } else if filteredActivities.isEmpty && (!settings.showProjectDock || dockProjects.isEmpty) {
                 emptyView
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        savedProjects
                         ForEach(sections, id: \.category) { section in
                             let expanded = isExpanded(section.category, section.groups)
                             categoryHeader(section.category, count: section.groups.count, expanded: expanded) {
@@ -428,7 +470,14 @@ struct MenuPanel: View {
                                 }
                             }
                             if expanded {
-                                groupRows(section.groups)
+                                VStack(spacing: 0) {
+                                    groupRows(section.groups)
+                                }
+                                .padding(4)
+                                .background(AppAppearance.groupedSurface,
+                                            in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+                                .padding(.horizontal, AppAppearance.contentInset)
+                                .padding(.bottom, 6)
                             }
                         }
                         if !model.snapshot.limitations.isEmpty {
@@ -439,8 +488,8 @@ struct MenuPanel: View {
                                         .padding(.top, 4)
                                 }
                             }
-                            .font(.callout)
-                            .padding(.horizontal, 14)
+                            .font(AppAppearance.body)
+                            .padding(.horizontal, AppAppearance.contentInset)
                             .padding(.vertical, 10)
                         }
                     }
@@ -448,6 +497,114 @@ struct MenuPanel: View {
                 }
             }
         }
+    }
+
+    private var dockProjects: [FixedAddressBinding] {
+        fixed.orderedBindings.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    @ViewBuilder private var savedProjects: some View {
+        if settings.showProjectDock && !dockProjects.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(L("Projects", "项目")).font(AppAppearance.sectionTitle)
+                    Spacer()
+                    if fixed.isWorking { ProgressView().controlSize(.small) }
+                }
+                ProjectShortcutGrid() {
+                        ForEach(dockProjects, id: \.id) { binding in
+                            let activity = binding.resolve(in: model.snapshot.activities)
+                            let running = fixed.urls[binding.id] != nil
+                            Button {
+                                guard shortcutDrag.id == nil,
+                                      activity != nil || running || fixed.launchable.contains(binding.id) else { return }
+                                openProject(binding)
+                            } label: {
+                                shortcutLabel(binding)
+                            }
+                            .buttonStyle(QuietButtonStyle())
+                            .quietFocus()
+                            .disabled(fixed.isWorking)
+                            .background {
+                                GeometryReader { geometry in
+                                    Color.clear.preference(key: ProjectShortcutFrames.self,
+                                        value: [binding.id: geometry.frame(in: .named("projectDock"))])
+                                }
+                            }
+                            .modifier(ShortcutDragGesture(id: binding.id, frames: shortcutFrames,
+                                enabled: !fixed.isWorking, drag: shortcutDrag, landingFrame: { shortcutFrames[$0] }) { source, target in
+                                    withAnimation(motion) { fixed.moveShortcut(source, to: target) }
+                                })
+                            .help(running ? L("Open \(binding.name).localhost", "打开 \(binding.name).localhost")
+                                  : fixed.launchable.contains(binding.id)
+                                  ? L("Start and open \(binding.name).localhost", "启动并打开 \(binding.name).localhost")
+                                  : L("Start this project to open its address", "项目运行后即可打开固定地址"))
+                            .accessibilityLabel(binding.name)
+                            .accessibilityValue(running ? L("Running", "运行中") : L("Not running", "未运行"))
+                            .opacity(shortcutDrag.id == binding.id ? 0 : 1)
+                            .contextMenu {
+                                Button(L("Disable Fixed Address", "停用固定地址")) { Task { await fixed.disable(binding) } }
+                                    .disabled(fixed.isWorking)
+                            }
+                        }
+                }
+                .animation(shortcutDrag.reorderAnimation, value: dockProjects.map(\.id))
+                .overlay(alignment: .topLeading) {
+                    if let id = shortcutDrag.id, let center = shortcutDrag.center,
+                       let binding = fixed.bindings.first(where: { $0.id == id }) {
+                        shortcutLabel(binding)
+                            .padding(4)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            .scaleEffect(shortcutDrag.settling || reduceMotion ? 1 : 1.07)
+                            .shadow(color: .black.opacity(shortcutDrag.settling ? 0.06 : 0.18), radius: 6, y: 3)
+                            .position(center)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .coordinateSpace(name: "projectDock")
+                .onPreferenceChange(ProjectShortcutFrames.self) { shortcutFrames = $0 }
+                if let error = fixed.error { Text(error).font(AppAppearance.secondary).foregroundStyle(.secondary) }
+            }
+            .padding(12)
+            .background(AppAppearance.groupedSurface,
+                        in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+            .padding(.horizontal, AppAppearance.contentInset)
+            .padding(.vertical, 8)
+            .onChange(of: dockProjects.isEmpty) {
+                if dockProjects.isEmpty { shortcutDrag.clear() }
+            }
+            .onDisappear { shortcutDrag.clear() }
+        }
+    }
+
+    @ViewBuilder private func shortcutLabel(_ binding: FixedAddressBinding) -> some View {
+        let activity = binding.resolve(in: model.snapshot.activities)
+        let running = fixed.urls[binding.id] != nil
+        VStack(spacing: 6) {
+            Group {
+                if let activity {
+                    ProcessIconView(activity: activity, size: 36)
+                } else if let path = ProcessIconResolver.projectIconPath(in: binding.projectRoot) {
+                    Image(nsImage: ProcessIconCache.shared.image(forFile: path))
+                        .resizable().scaledToFit().frame(width: 36, height: 36)
+                        .clipShape(RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+                } else {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: binding.projectRoot))
+                        .resizable().scaledToFit().frame(width: 36, height: 36)
+                }
+            }
+            Text(binding.name)
+                .font(AppAppearance.secondary)
+                .lineLimit(1).truncationMode(.middle)
+                .frame(width: 68)
+            Circle()
+                .fill(running ? Color.accentColor : Color.clear)
+                .overlay(Circle().strokeBorder(running ? Color.clear : Color.secondary, lineWidth: 1))
+                .frame(width: 4, height: 4)
+        }
+        .frame(width: 68, height: ProjectShortcutGridMetrics.rowHeight)
+
+        .contentShape(Rectangle())
     }
 
     private var searchField: some View {
@@ -472,23 +629,22 @@ struct MenuPanel: View {
                 .accessibilityLabel(L("Clear search", "清除搜索"))
             }
         }
-        .font(.callout)
+        .font(AppAppearance.body)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .padding(.horizontal, 14)
+        .background(AppAppearance.groupedSurface, in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
+        .padding(.horizontal, AppAppearance.contentInset)
         .padding(.vertical, 8)
     }
 
     private func sectionHeader<Accessory: View>(_ title: String, @ViewBuilder accessory: () -> Accessory) -> some View {
         HStack(spacing: 5) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+            Text(title)
+                .font(AppAppearance.sectionTitle)
             Spacer()
             accessory()
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, AppAppearance.contentInset)
         .padding(.top, 10)
         .padding(.bottom, 4)
     }
@@ -538,7 +694,7 @@ struct MenuPanel: View {
             if foldable {
                 VStack(spacing: 0) {
                     if expanded {
-                        Divider().padding(.horizontal, 14)
+                        Divider().padding(.horizontal, AppAppearance.contentInset)
                     }
 
                     PortRow(
@@ -563,7 +719,7 @@ struct MenuPanel: View {
                     }
 
                     if expanded {
-                        Divider().padding(.horizontal, 14)
+                        Divider().padding(.horizontal, AppAppearance.contentInset)
                     }
                 }
                 .animation(motion, value: revealed)
@@ -572,11 +728,13 @@ struct MenuPanel: View {
                     port: activity.listener.port,
                     icon: activity,
                     title: activity.inference.label,
-                    subtitle: group.subtitle,
+                    subtitle: fixed.binding(for: activity).map { "\($0.name).localhost" } ?? group.subtitle,
+                    fixedName: fixed.binding(for: activity)?.name,
                     trailing: activity.process.compactUptime,
                     isLAN: activity.scope == .lan,
                     closeFailed: model.awaitsForceClose(activity),
                     onSelect: { showDetails(activity) },
+                    onFixedAddress: fixedAddressAction(for: activity),
                     onClose: closeTarget.map { target in { closeNow(target) } }
                 )
                 .contextMenu { contextMenu(for: group.activities) }
@@ -592,10 +750,13 @@ struct MenuPanel: View {
             port: activity.listener.port,
             icon: nil,
             title: activity.listener.addresses.joined(separator: ", "),
-            subtitle: activity.scope == .lan ? L("LAN-facing", "局域网可见") : L("Local only", "仅本机"),
+            subtitle: fixed.binding(for: activity).map { "\($0.name).localhost" }
+                ?? (activity.scope == .lan ? L("LAN-facing", "局域网可见") : L("Local only", "仅本机")),
+            fixedName: fixed.binding(for: activity)?.name,
             isLAN: activity.scope == .lan,
             closeFailed: model.awaitsForceClose(activity),
             onSelect: { showDetails(activity) },
+            onFixedAddress: fixedAddressAction(for: activity),
             onClose: closeTarget.map { target in { closeNow(target) } }
         )
         .contextMenu { contextMenu(for: [activity]) }
@@ -614,7 +775,7 @@ struct MenuPanel: View {
                 .font(.headline)
             Text(scanUnavailable ? L("Check the message above, then refresh.", "请查看上方提示，然后刷新。")
                 : nothingListening ? L("No TCP listeners on this Mac.", "这台 Mac 上没有 TCP 监听。") : L("Try a port number, process name, or PID.", "试试端口号、进程名或 PID。"))
-                .font(.callout)
+                .font(AppAppearance.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if !query.isEmpty {
@@ -643,7 +804,7 @@ struct MenuPanel: View {
                         Text(L("Port \(String(port))", "端口 \(String(port))"))
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))
                         Text(activity.inference.label)
-                            .font(.callout)
+                            .font(AppAppearance.body)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -703,14 +864,14 @@ struct MenuPanel: View {
                             Text(L("Can't be closed from LeftOpen", "无法在 LeftOpen 中关闭"))
                                 .font(.callout.weight(.medium))
                             Text(protection)
-                                .font(.caption)
+                                .font(AppAppearance.secondary)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(AppAppearance.groupedSurface, in: RoundedRectangle(cornerRadius: AppAppearance.cornerRadius, style: .continuous))
                 }
 
                 Divider()
@@ -732,11 +893,8 @@ struct MenuPanel: View {
                 }
 
                 Divider()
-                PortlessProjectView(project: activity.projectMarker,
-                                    urls: portlessURLs[activity.id] ?? [], readError: portlessError,
-                                    otherHostnames: Set(portlessURLs.filter { $0.key != activity.id }
-                                        .values.flatMap { $0 }.compactMap(\.host))
-                                        .subtracting(Set((portlessURLs[activity.id] ?? []).compactMap(\.host))))
+                PortlessProjectView(activity: activity, webURL: webURLs[activity.id],
+                                    urls: portlessURLs[activity.id] ?? [], readError: portlessError)
 
                 Divider()
                 DisclosureGroup(L("Owner evidence", "归属证据"), isExpanded: $evidenceExpanded) {
@@ -754,13 +912,13 @@ struct MenuPanel: View {
                         }
                         infoRow(L("Confidence", "可信度"), confidenceText(activity.inference.confidence))
                         Text(activity.inference.reason)
-                            .font(.caption)
+                            .font(AppAppearance.secondary)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                     .padding(.top, 8)
                 }
-                .font(.callout)
+                .font(AppAppearance.body)
             }
             .padding(14)
         }
@@ -774,7 +932,7 @@ struct MenuPanel: View {
                 .padding(.bottom, 4)
             Text(L("No longer listening", "已不再监听")).font(.headline)
             Text(L("It went away during the last refresh.", "它在上次刷新时已经退出。"))
-                .font(.callout)
+                .font(AppAppearance.body)
                 .foregroundStyle(.secondary)
             Button(L("Back", "返回"), action: goBack)
                 .controlSize(.small)
@@ -794,7 +952,7 @@ struct MenuPanel: View {
                         .font(.title3.weight(.semibold))
                     Text(L("LeftOpen sends SIGTERM to PID \(String(plan.pid)) only. Nothing is force-quit, and child processes are not signalled.",
                             "LeftOpen 只向 PID \(String(plan.pid)) 发送 SIGTERM，不会强制退出，也不会向子进程发送信号。"))
-                        .font(.callout)
+                        .font(AppAppearance.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Divider()
@@ -825,11 +983,11 @@ struct MenuPanel: View {
                         Text(L("Close \(plans.count) project server\(plans.count == 1 ? "" : "s")?", "关闭 \(plans.count) 个项目服务器？"))
                             .font(.title3.weight(.semibold))
                         Text(L("LeftOpen sends SIGTERM to each process below. Apps and system services are not touched.", "LeftOpen 会向下面每个进程发送 SIGTERM，不会影响 App 和系统服务。"))
-                            .font(.callout)
+                            .font(AppAppearance.body)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, AppAppearance.contentInset)
                     .padding(.top, 14)
                     .padding(.bottom, 8)
                     ForEach(plans) { plan in
@@ -856,7 +1014,7 @@ struct MenuPanel: View {
             if model.isClosing {
                 ProgressView().controlSize(.small)
                 Text(L("Closing…", "正在关闭…"))
-                    .font(.callout)
+                    .font(AppAppearance.body)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -868,7 +1026,7 @@ struct MenuPanel: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(model.isClosing)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, AppAppearance.contentInset)
         .padding(.vertical, 10)
         .overlay(alignment: .top) { Divider() }
     }
@@ -880,7 +1038,7 @@ struct MenuPanel: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color(nsColor: .systemOrange))
         }
-        .font(.callout)
+        .font(AppAppearance.body)
     }
 
     private func confidenceText(_ confidence: String) -> String {
@@ -908,9 +1066,33 @@ struct MenuPanel: View {
     // MARK: - Actions
 
     @ViewBuilder
+    private func addressMenuItem(for activity: Activity, showPort: Bool = false) -> some View {
+        if let binding = fixed.binding(for: activity) {
+            Button(showPort ? L("Disable \(binding.name).localhost", "停用 \(binding.name).localhost")
+                   : L("Disable Fixed Address", "停用固定地址")) {
+                Task { await fixed.disable(binding) }
+            }
+            .disabled(fixed.isWorking)
+        } else if let action = fixedAddressAction(for: activity) {
+            Button(showPort ? L("Fix Port \(activity.listener.port)", "固定端口 \(activity.listener.port)")
+                   : L("Enable Fixed Address", "固定地址"), action: action)
+        }
+    }
+
+    @ViewBuilder
     private func contextMenu(for activities: [Activity]) -> some View {
         let ports = Array(Set(activities.map(\.listener.port))).sorted()
         let primary = activities[0]
+        let addressTargets = activities.filter { fixed.binding(for: $0) != nil || fixedAddressAction(for: $0) != nil }
+        if addressTargets.count == 1, let activity = addressTargets.first {
+            addressMenuItem(for: activity)
+            Divider()
+        } else if addressTargets.count > 1 {
+            Menu(L("Fixed Addresses", "固定地址")) {
+                ForEach(addressTargets) { addressMenuItem(for: $0, showPort: true) }
+            }
+            Divider()
+        }
         let webTargets = activities.compactMap { activity -> WebTarget? in
             browserURL(for: activity).map { WebTarget(activity: activity, url: $0) }
         }
@@ -954,7 +1136,8 @@ struct MenuPanel: View {
     }
 
     private func browserURL(for activity: Activity) -> URL? {
-        webURLs[activity.id]
+        if let binding = fixed.binding(for: activity), let url = fixed.urls[binding.id] { return url }
+        return webURLs[activity.id]
     }
 
     private func revealTarget(for activity: Activity) -> String? {
@@ -982,11 +1165,90 @@ private struct WebTarget: Identifiable {
     var id: String { activity.id }
 }
 
-/// The panel's surface colour, shared by the pages, the opaque row cards, and Settings.
-func panelSurface(_ colorScheme: ColorScheme) -> Color {
-    colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor)
+@MainActor
+final class ShortcutDragState: ObservableObject {
+    @Published private(set) var id: String?
+    @Published private(set) var center: CGPoint?
+    @Published private(set) var settling = false
+    private var grabOffset = CGSize.zero
+    private var landingTask: Task<Void, Never>?
+    private var cursorPushed = false
+    var reduceMotion = false
+    var reorderAnimation: Animation { reduceMotion ? .easeOut(duration: 0.12) : .interactiveSpring(response: 0.28, dampingFraction: 0.86) }
+
+    func update(id: String, start: CGPoint, location: CGPoint, frame: CGRect) {
+        if self.id != id || settling {
+            clear()
+            self.id = id
+            grabOffset = CGSize(width: start.x - frame.midX, height: start.y - frame.midY)
+            NSCursor.closedHand.push()
+            cursorPushed = true
+        }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            center = CGPoint(x: location.x - grabOffset.width, y: location.y - grabOffset.height)
+        }
+    }
+
+    func finish(frame: CGRect?) {
+        if cursorPushed { NSCursor.pop(); cursorPushed = false }
+        guard let frame else { clear(); return }
+        withAnimation(reorderAnimation) {
+            settling = true
+            center = CGPoint(x: frame.midX, y: frame.midY)
+        }
+        landingTask = Task {
+            try? await Task.sleep(for: .milliseconds(240))
+            guard !Task.isCancelled else { return }
+            clear()
+        }
+    }
+
+    func clear() {
+        landingTask?.cancel(); landingTask = nil
+        if cursorPushed { NSCursor.pop(); cursorPushed = false }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { id = nil; center = nil; settling = false }
+    }
 }
 
+/// Pointer position drives the floating preview directly; layout changes animate separately.
+struct ShortcutDragGesture: ViewModifier {
+    let id: String
+    let frames: [String: CGRect]
+    var enabled = true
+    @ObservedObject var drag: ShortcutDragState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let landingFrame: (String) -> CGRect?
+    let move: (String, String) -> Void
+
+    func body(content: Content) -> some View {
+        content.highPriorityGesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("projectDock"))
+            .onChanged { value in
+                guard enabled, let frame = frames[id] else { return }
+                drag.reduceMotion = reduceMotion
+                drag.update(id: id, start: value.startLocation, location: value.location, frame: frame)
+                guard let target = frames.first(where: { $0.key != id && $0.value.contains(value.location) })?.key else { return }
+                withAnimation(drag.reorderAnimation) { move(id, target) }
+            }
+            .onEnded { _ in
+                Task {
+                    await Task.yield()
+                    guard drag.id == id else { return }
+                    drag.finish(frame: landingFrame(id))
+                }
+            })
+    }
+}
+
+struct ProjectShortcutFrames: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
 
 private struct ListenerGroup: Identifiable {
     let id: String
@@ -1006,6 +1268,9 @@ private struct ListenerGroup: Identifiable {
     var subtitle: String {
         if pids.count > 1 { return L("\(pids.count) processes", "\(pids.count) 个进程") }
         let pid = "PID \(primary.process.pid)"
+        if primary.editorPreview != nil, let app = primary.applicationBundle {
+            return "\(app.name) · \(pid)"
+        }
         return primary.inference.label == primary.process.command ? pid : "\(primary.process.command) · \(pid)"
     }
 }
@@ -1013,8 +1278,8 @@ private struct ListenerGroup: Identifiable {
 /// One row style for every port list in the panel.
 ///
 /// Interactive rows (with `onSelect`) are a card lying on an action layer: Close (red) under the
-/// leading edge, when closable, and Details (blue) under the trailing edge. Drag right to close,
-/// left for details. Dragging, by mouse
+/// leading edge, when closable, and Fixed address (blue) under the trailing edge. Drag right to close,
+/// left to pin or unlink a fixed address. Dragging, by mouse
 /// or two-finger trackpad swipe, slides the card across the layer, and letting go past the
 /// threshold runs the uncovered action. Swiping to close is the confirmation: no review page.
 private struct PortRow: View {
@@ -1023,6 +1288,7 @@ private struct PortRow: View {
     var icon: Activity?
     let title: String
     var subtitle: String?
+    var fixedName: String?
     var trailing: String?
     var isLAN = false
     var closeFailed = false
@@ -1032,11 +1298,11 @@ private struct PortRow: View {
     /// Some(expanded) for a row that folds; the chevron is only ever a fold control.
     var disclosure: Bool?
     var onSelect: (() -> Void)?
+    var onFixedAddress: (() -> Void)?
     var onClose: (() -> Void)?
 
     @StateObject private var swipe = SwipeTracker()
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
 
     private var isLifted: Bool { swipe.offset != 0 }
@@ -1080,11 +1346,22 @@ private struct PortRow: View {
             .onChange(of: isEnabled) { _, enabled in
                 if !enabled { swipe.setListening(false) }
             }
+            .onChange(of: onFixedAddress != nil) { configureSwipe() }
             .onDisappear { swipe.setListening(false) }
+            .onAppear {
+                // Developer snapshots can show the real gesture's reveal state without committing it.
+                if ProcessInfo.processInfo.environment["LEFTOPEN_SNAPSHOT_SWIPE"] == "fixed-address" {
+                    configureSwipe()
+                    swipe.drag(CGSize(width: -110, height: 0))
+                }
+            }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(onSelect == nil ? [] : .isButton)
             .accessibilityAction { onSelect?() }
             .accessibilityActions {
+                if let onFixedAddress {
+                    Button(fixedName == nil ? L("Fixed address", "固定地址") : L("Unlink", "停用地址"), action: onFixedAddress)
+                }
                 if let onClose {
                     Button(L("Close Port \(port.map(String.init) ?? "")", "关闭端口 \(port.map(String.init) ?? "")"), action: onClose)
                 }
@@ -1098,6 +1375,13 @@ private struct PortRow: View {
                     if let port {
                         Text(String(port))
                             .font(.system(.callout, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(fixedName == nil ? Color.primary : Color.accentColor)
+                        if fixedName != nil {
+                            Image(systemName: "link")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(L("Fixed address enabled", "已固定地址"))
+                        }
                     } else {
                         Color.clear.frame(width: 1)
                     }
@@ -1127,11 +1411,11 @@ private struct PortRow: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(AppAppearance.body.weight(.medium))
                     .lineLimit(1)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(AppAppearance.secondary)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -1141,7 +1425,7 @@ private struct PortRow: View {
 
             if let trailing {
                 Text(trailing)
-                    .font(.caption)
+                    .font(AppAppearance.secondary)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -1161,7 +1445,7 @@ private struct PortRow: View {
             // Opaque, so the action layer is only seen where the card has moved off it.
             let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
             shape
-                .fill(panelSurface(colorScheme))
+                .fill(AppAppearance.groupedSurface)
                 .overlay(shape.fill(Color.primary.opacity(isHovered || isLifted ? 0.06 : 0)))
                 .shadow(color: .black.opacity(isLifted ? 0.14 : 0), radius: 1.5, y: 0.5)
         }
@@ -1174,8 +1458,7 @@ private struct PortRow: View {
             .accessibilityLabel(L("Previous close failed; close again to force", "上次关闭失败；再次关闭将强制结束"))
     }
 
-    /// Details under the leading half, Close (or a lock, when it can't be closed) under the
-    /// trailing half. Each label is centred in whatever part of its side is uncovered.
+    /// Pull right to close; pull left for a fixed address. Unavailable actions resist the pull.
     @ViewBuilder
     private var actionLayer: some View {
         if allowsSwipe && onSelect != nil && swipe.offset != 0 {
@@ -1183,7 +1466,7 @@ private struct PortRow: View {
                 if swipe.offset > 0 {
                     side(onClose == nil ? .locked : .close, alignment: .leading)
                 } else {
-                    side(.details, alignment: .trailing)
+                    side(onFixedAddress == nil ? .addressUnavailable : .fixedAddress, alignment: .trailing)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -1191,27 +1474,28 @@ private struct PortRow: View {
         }
     }
 
-    private enum Action { case details, close, locked }
+    private enum Action { case fixedAddress, addressUnavailable, close, locked }
 
     private func side(_ action: Action, alignment: Alignment) -> some View {
         let tint = switch action {
-        case .details: Color(nsColor: .systemBlue)
+        case .fixedAddress: Color(nsColor: .systemBlue)
         case .close: Color(nsColor: .systemRed)
-        case .locked: Color.secondary
+        case .locked, .addressUnavailable: Color.secondary
         }
-        let armed = swipe.isArmed && (action == .details) == (swipe.offset < 0)
+        let isAddress = action == .fixedAddress || action == .addressUnavailable
+        let armed = swipe.isArmed && isAddress == (swipe.offset < 0)
         return ZStack(alignment: alignment) {
             Rectangle().fill(armed ? tint : tint.opacity(0.16))
             HStack(spacing: 5) {
-                Image(systemName: action == .details ? "info.circle.fill" : action == .close ? "xmark.circle.fill" : "lock.fill")
+                Image(systemName: isAddress ? "link" : action == .close ? "xmark.circle.fill" : "lock.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .scaleEffect(armed ? 1.15 : 1)
-                Text(action == .details ? L("Details", "详情")
+                Text(isAddress ? (fixedName == nil ? L("Fixed address", "固定地址") : L("Unlink", "停用地址"))
                      : closeFailed ? L("Force Close", "强制关闭") : L("Close", "关闭"))
                     .font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(armed ? Color.white : tint)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, AppAppearance.contentInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         .accessibilityHidden(true)
@@ -1230,8 +1514,9 @@ private struct PortRow: View {
 
     private func configureSwipe() {
         swipe.allowsLeading = onClose != nil
+        swipe.allowsTrailing = onFixedAddress != nil
         swipe.onCommit = { edge in
-            if edge == .leading { onClose?() } else { onSelect?() }
+            if edge == .leading { onClose?() } else { onFixedAddress?() }
         }
     }
 }
@@ -1244,8 +1529,9 @@ private final class SwipeTracker: ObservableObject {
     @Published private(set) var offset: CGFloat = 0
     @Published private(set) var isArmed = false
 
-    /// Whether the leading action (revealed by dragging right) exists; trailing always does.
+    /// Whether either direction has an available action.
     var allowsLeading = true
+    var allowsTrailing = true
     var onCommit: (HorizontalEdge) -> Void = { _ in }
 
     private let threshold: CGFloat = 84
@@ -1333,7 +1619,7 @@ private final class SwipeTracker: ObservableObject {
     // MARK: Shared
 
     private func isAllowed(_ direction: CGFloat) -> Bool {
-        direction < 0 || allowsLeading
+        direction < 0 ? allowsTrailing : allowsLeading
     }
 
     private func update() {
@@ -1388,7 +1674,7 @@ private struct QuietButtonStyle: ButtonStyle {
     private struct QuietButton: View {
         let configuration: Configuration
         @Environment(\.isEnabled) private var isEnabled
-        @State private var isHovered = false
+    @State private var isHovered = false
 
         var body: some View {
             configuration.label
@@ -1428,7 +1714,7 @@ private struct ScopeLabel: View {
             Text(scope == .lan ? L("LAN-facing", "局域网可见") : L("Local only", "仅本机"))
                 .foregroundStyle(.secondary)
         }
-        .font(.caption)
+        .font(AppAppearance.secondary)
         .accessibilityElement(children: .combine)
         .help(scope == .lan
             ? L("Non-loopback or wildcard bind observed. Localhost may still work; LAN reachability depends on the actual address and firewall.",
@@ -1612,3 +1898,19 @@ enum MenuBarDoor {
     }
 }
 
+
+
+private enum ProjectShortcutGridMetrics {
+    static let rowHeight: CGFloat = 76
+}
+
+/// Shortcuts wrap inside the panel and scroll with the surrounding port list.
+struct ProjectShortcutGrid<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            content()
+        }
+    }
+}
