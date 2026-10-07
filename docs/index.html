@@ -130,6 +130,8 @@
       --faint: #86868b;
       --line: #e5e5ea;
       --accent: #b9651c;
+      --badge-bg: #fff0e0;
+      --badge-ink: #8a430d;
       --terminal: #1d1d1f;
       --shadow: 0 24px 64px -28px rgb(0 0 0 / 24%), 0 10px 24px -18px rgb(0 0 0 / 18%);
       --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
@@ -148,6 +150,8 @@
         --faint: #86868b;
         --line: #363639;
         --accent: #f0a35c;
+        --badge-bg: #382919;
+        --badge-ink: #ffc991;
         --terminal: #0c0c0d;
         --shadow: 0 28px 72px -28px rgb(0 0 0 / 82%), 0 10px 28px -16px rgb(0 0 0 / 62%);
       }
@@ -385,10 +389,12 @@
 
     .essentials {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 0;
     }
 
     .essential {
+      min-width: 0;
       padding: 22px 0;
       border-top: 1px solid var(--line);
     }
@@ -401,10 +407,32 @@
     .essential:last-child { padding-bottom: 0; }
 
     .essential h3 {
-      margin: 0 0 7px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      min-height: 26px;
+      margin: 0 0 8px;
+      line-height: 1.4;
       font-size: 18px;
       letter-spacing: -0.02em;
     }
+
+    .feature-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--badge-bg);
+      color: var(--badge-ink);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.4;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .essential code { overflow-wrap: anywhere; }
 
     .essential p {
       max-width: 31rem;
@@ -598,19 +626,13 @@
 
       .essentials {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 28px;
+        gap: 32px 40px;
       }
 
       .essential,
       .essential:first-child {
         padding: 18px 0 0;
         border-top: 1px solid var(--line);
-      }
-
-      .essential:last-child {
-        grid-column: 1 / -1;
-        width: calc(50% - 14px);
-        justify-self: center;
       }
 
       .faq-grid {
@@ -719,7 +741,7 @@
           <article class="essential"><h3 lang="zh">端口属于谁</h3><h3 lang="en">Know the owner</h3><p lang="zh">从进程、工作目录和项目标记推断归属，避免只看到一个模糊的 <code>node</code>。</p><p lang="en">It uses the process, working directory and project markers, so you see more than a generic <code>node</code>.</p></article>
           <article class="essential"><h3 lang="zh">哪里可见</h3><h3 lang="en">Know the scope</h3><p lang="zh">区分只在本机监听的服务，以及可能暴露到局域网的端口。</p><p lang="en">It distinguishes local-only services from ports that may be visible on your LAN.</p></article>
           <article class="essential"><h3 lang="zh">该关什么</h3><h3 lang="en">Close what you choose</h3><p lang="zh">可关闭的服务在前；系统服务和应用仍可查看，但不会被 LeftOpen 关闭。</p><p lang="en">Closable services come first. System services and apps remain visible, but LeftOpen will not close them.</p></article>
-          <article class="essential"><h3 lang="zh">固定地址</h3><h3 lang="en">Keep one address</h3><p lang="zh">为项目启用 <code>https://myapp.localhost</code>，端口变化后自动跟随。内置 Portless，只需在设置中授权一次。</p><p lang="en">Give a project <code>https://myapp.localhost</code> that follows it across port changes. Portless is built in; authorize once in Settings.</p></article>
+          <article class="essential"><h3 lang="zh">固定地址 <span class="feature-badge">新功能</span></h3><h3 lang="en">Keep one address <span class="feature-badge">New</span></h3><p lang="zh">为项目启用 <code>https://myapp.localhost</code>，端口变化后自动跟随。内置 Portless，只需在设置中授权一次。</p><p lang="en">Give a project <code>https://myapp.localhost</code> that follows it across port changes. Portless is built in; authorize once in Settings.</p></article>
         </div>
       </section>
       <section class="safety">
