@@ -64,6 +64,17 @@ the notarized ZIP in this workflow.
 
 ## Validation
 
+CI and release preflight execute the hardened Node runtime and bundled Portless
+on both native Intel and Apple Silicon runners. Intel Node alone receives
+`allow-unsigned-executable-memory`; the app and ARM Node do not. Both local and
+Developer ID builds use `Scripts/sign-portless-runtime.sh`. Runtime smoke tests
+also run after Developer ID signing and after extracting the final archive.
+They execute JavaScript, not just `node --version`, which skips V8 initialization.
+For a local cross-architecture check on Apple Silicon with Rosetta installed, run
+`python3 Scripts/verify-portless-runtime.py <app>/Contents/Resources/Portless --architecture x64`.
+These non-privileged checks do not install launchd services or alter certificate
+trust; the app's first-run authorization still needs interactive device testing.
+
 Run `python3 -m unittest discover -s Tests/ReleaseTests` for version validation
 and `actionlint .github/workflows/release.yml` for workflow checks. The first
 configured Actions run must still verify the real hosted runner, Apple credentials,
