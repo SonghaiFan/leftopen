@@ -34,62 +34,15 @@ final class UninstallManager: ObservableObject {
         defer { isWorking = false }
         do {
             try await FixedAddressManager.shared.pauseForUninstall()
-            if SMAppService.mainApp.status != .notRegistered { try await SMAppService.mainApp.unregister() }
-            let runtime = resources.appendingPathComponent("Portless")
-            #if arch(arm64)
-            let node = runtime.appendingPathComponent("node-arm64")
-            #else
-            let node = runtime.appendingPathComponent("node-x64")
-            #endif
-            let home = NSHomeDirectory(), user = NSUserName(), uid = String(getuid())
-            let prompt = L("Remove LeftOpen’s local address service and certificate.", "移除 LeftOpen 的本地地址服务与证书。")
             let brew = UpdateChecker.shared.installedWithHomebrew
                 ? ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].first { FileManager.default.isExecutableFile(atPath: $0) } : nil
-            try await Task.detached(priority: .utility) {
-                let certificate = PortlessService.directory.appendingPathComponent("ca.pem")
-                let fingerprint: String
-                switch AddressSetupPolicy.certificateFile(at: certificate.path) {
-                case .readable:
-                    try checkCertificateAncestors(certificate)
-                    let data = try Data(contentsOf: certificate)
-                    // Decode PEM with Apple's certificate parser, then hash its DER identity.
-                    let text = String(decoding: data, as: UTF8.self)
-                    let body = text.replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "")
-                        .replacingOccurrences(of: "-----END CERTIFICATE-----", with: "")
-                        .components(separatedBy: .whitespacesAndNewlines).joined()
-                    guard let der = Data(base64Encoded: body), SecCertificateCreateWithData(nil, der as CFData) != nil else {
-                        throw CleanupFailure(code: "certificateUnavailable")
-                    }
-                    fingerprint = SHA256.hash(data: der).map { String(format: "%02X", $0) }.joined()
-                    try removeUserCertificate(at: certificate, fingerprint: fingerprint)
-                case .missing: fingerprint = "-"
-                default: throw CleanupFailure(code: "certificateUnavailable")
-                }
-                let arguments = [node.path, runtime.appendingPathComponent("uninstall.mjs").path, home, user, uid, fingerprint]
-                let command = arguments.map(shellQuote).joined(separator: " ")
-                let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-                let result = try execute("/usr/bin/osascript", ["-e", "do shell script \"\(escaped)\" with administrator privileges with prompt \"\(prompt)\""])
-                guard result.status == 0 else {
-                    let codes = ["differentOwner", "unsafePath", "unsafeService", "certificateChanged", "certificateUnavailable", "unsafeHosts", "serviceStopFailed", "certificateRemovalFailed", "keychainUnavailable"]
-                    throw CleanupFailure(code: result.diagnostic.contains("-128") ? "cancelled"
-                        : codes.first { result.diagnostic.contains($0) } ?? "cleanupFailed")
-                }
-                // The privileged helper removes root-owned state; only current-user caches remain.
-                for relative in ["Library/Caches/app.leftopen.mac", "Library/HTTPStorages/app.leftopen.mac",
-                    "Library/Saved Application State/app.leftopen.mac.savedState"] {
-                    let target = URL(fileURLWithPath: home).appendingPathComponent(relative)
-                    if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
-                }
-            }.value
-            UserDefaults.standard.removePersistentDomain(forName: "app.leftopen.mac")
-            UserDefaults.standard.synchronize()
-            let preferences = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Preferences/app.leftopen.mac.plist")
-            if FileManager.default.fileExists(atPath: preferences.path) { try FileManager.default.removeItem(at: preferences) }
+            try await Self.cleanupInstallation(resources: resources)
             if let brew {
                 // Let Homebrew remove its Caskroom entry and CLI link, not only the app bundle.
                 try await Task.detached(priority: .utility) {
                     let result = try execute(brew, ["uninstall", "--cask", "--zap", "songhaifan/tap/leftopen"],
-                        extraEnvironment: ["HOMEBREW_NO_AUTOREMOVE": "1", "HOMEBREW_NO_AUTO_UPDATE": "1"])
+                        extraEnvironment: ["HOMEBREW_NO_AUTOREMOVE": "1", "HOMEBREW_NO_AUTO_UPDATE": "1",
+                            "LEFTOPEN_UNINSTALL_CLEANED": "1"])
                     guard result.status == 0 else { throw CleanupFailure(code: "packageRemovalFailed") }
                 }.value
             } else {
@@ -111,6 +64,83 @@ final class UninstallManager: ObservableObject {
                 self.error = L("Uninstall could not finish. Some cleanup may already be complete. Retry to finish.", "卸载未完成。部分清理可能已完成，请重试。")
             }
         }
+    }
+
+    /// Homebrew owns final package removal. This path never starts the UI, calls brew or trashes the app.
+    static func cleanupForHomebrew() async -> Int32 {
+        do {
+            guard getuid() != 0, Bundle.main.bundleURL.pathExtension == "app",
+                  Bundle.main.bundleIdentifier == "app.leftopen.mac", let resources = Bundle.main.resourceURL else {
+                throw CleanupFailure(code: "installedUserAppRequired")
+            }
+            guard NSRunningApplication.runningApplications(withBundleIdentifier: "app.leftopen.mac")
+                .allSatisfy({ $0.processIdentifier == getpid() }) else {
+                throw CleanupFailure(code: "quitLeftOpenFirst")
+            }
+            let processes = try execute("/bin/ps", ["-axww", "-o", "comm="])
+            guard processes.status == 0 else { throw CleanupFailure(code: "processCheckFailed") }
+            guard !HomebrewCleanupPolicy.hasAppRuntime(processTable: processes.output) else {
+                throw CleanupFailure(code: "stopLeftOpenProjectsFirst")
+            }
+            try await cleanupInstallation(resources: resources)
+            print("LeftOpen cleanup completed. Homebrew can now remove the app.")
+            return 0
+        } catch {
+            let code = (error as? CleanupFailure)?.code ?? "cleanupFailed"
+            // Only bounded codes, never command diagnostics or paths.
+            FileHandle.standardError.write(Data("LeftOpen cleanup stopped (\(code)). Quit LeftOpen and stop projects launched by it, then retry. Authorization cancellation leaves the app installed.\n".utf8))
+            return 1
+        }
+    }
+
+    private static func cleanupInstallation(resources: URL) async throws {
+        if SMAppService.mainApp.status != .notRegistered { try await SMAppService.mainApp.unregister() }
+        let runtime = resources.appendingPathComponent("Portless")
+        #if arch(arm64)
+        let node = runtime.appendingPathComponent("node-arm64")
+        #else
+        let node = runtime.appendingPathComponent("node-x64")
+        #endif
+        let home = NSHomeDirectory(), user = NSUserName(), uid = String(getuid())
+        let prompt = L("Remove LeftOpen’s local address service and certificate.", "移除 LeftOpen 的本地地址服务与证书。")
+        try await Task.detached(priority: .utility) {
+            let certificate = PortlessService.directory.appendingPathComponent("ca.pem")
+            let fingerprint: String
+            switch AddressSetupPolicy.certificateFile(at: certificate.path) {
+            case .readable:
+                try checkCertificateAncestors(certificate)
+                let data = try Data(contentsOf: certificate)
+                let text = String(decoding: data, as: UTF8.self)
+                let body = text.replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "")
+                    .replacingOccurrences(of: "-----END CERTIFICATE-----", with: "")
+                    .components(separatedBy: .whitespacesAndNewlines).joined()
+                guard let der = Data(base64Encoded: body), SecCertificateCreateWithData(nil, der as CFData) != nil else {
+                    throw CleanupFailure(code: "certificateUnavailable")
+                }
+                fingerprint = SHA256.hash(data: der).map { String(format: "%02X", $0) }.joined()
+                try removeUserCertificate(at: certificate, fingerprint: fingerprint)
+            case .missing: fingerprint = "-"
+            default: throw CleanupFailure(code: "certificateUnavailable")
+            }
+            let arguments = [node.path, runtime.appendingPathComponent("uninstall.mjs").path, home, user, uid, fingerprint]
+            let command = arguments.map(shellQuote).joined(separator: " ")
+            let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let result = try execute("/usr/bin/osascript", ["-e", "do shell script \"\(escaped)\" with administrator privileges with prompt \"\(prompt)\""])
+            guard result.status == 0 else {
+                let codes = ["differentOwner", "unsafePath", "unsafeService", "certificateChanged", "certificateUnavailable", "unsafeHosts", "serviceStopFailed", "certificateRemovalFailed", "keychainUnavailable"]
+                throw CleanupFailure(code: result.diagnostic.contains("-128") ? "cancelled"
+                    : codes.first { result.diagnostic.contains($0) } ?? "cleanupFailed")
+            }
+            for relative in ["Library/Caches/app.leftopen.mac", "Library/HTTPStorages/app.leftopen.mac",
+                "Library/Saved Application State/app.leftopen.mac.savedState"] {
+                let target = URL(fileURLWithPath: home).appendingPathComponent(relative)
+                if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+            }
+        }.value
+        UserDefaults.standard.removePersistentDomain(forName: "app.leftopen.mac")
+        UserDefaults.standard.synchronize()
+        let preferences = URL(fileURLWithPath: home).appendingPathComponent("Library/Preferences/app.leftopen.mac.plist")
+        if FileManager.default.fileExists(atPath: preferences.path) { try FileManager.default.removeItem(at: preferences) }
     }
 }
 

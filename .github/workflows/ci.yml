@@ -21,7 +21,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Test release scripts
-        run: python3 -m unittest discover -s Tests/ReleaseTests
+        run: |
+          python3 -m unittest discover -s Tests/ReleaseTests
+          ruby Tests/HomebrewTests/uninstall_test.rb
+          brew ruby Tests/HomebrewTests/integration.rb
       - name: Test Swift package
         run: swift test
       - name: Build app and CLI
