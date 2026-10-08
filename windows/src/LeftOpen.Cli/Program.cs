@@ -211,7 +211,7 @@ internal static class Program
             }
         }
 
-        Console.WriteLine(Dim("Sending a gentle close (WM_CLOSE / Ctrl+C / Ctrl+Break) and checking the port..."));
+        Console.WriteLine(Dim("Sending WM_CLOSE to a verified target-owned window and checking the port..."));
         var result = await service.ExecuteCloseAsync(plan);
         if (result.PortFree)
         {
@@ -228,7 +228,7 @@ internal static class Program
         if (!result.SignalsDelivered)
         {
             Console.WriteLine(Yellow(
-                $"No gentle close could be delivered to PID {plan.Pid} (it has no reachable window or console), so it was left running. " +
+                $"No gentle close was delivered to PID {plan.Pid}. {ProcessTerminator.NoSafeCloseReason} " +
                 "No force-kill was attempted."));
             return 1;
         }

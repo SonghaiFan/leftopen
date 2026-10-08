@@ -315,4 +315,26 @@ public class CloseServiceTests
         Assert.False(result.PortFree);
         Assert.Equal([101], result.RemainingPids);
     }
+    [Theory]
+    [InlineData("start")]
+    [InlineData("owner")]
+    [InlineData("exe")]
+    [InlineData("peer")]
+    public async Task ExecuteCloseAsync_ChangedPreview_NeverInvokesTerminator(string change)
+    {
+        var harness = new Harness { Snapshot = [Activity(100, 3000)] };
+        var service = harness.Service();
+        var plan = await service.PrepareCloseAsync(new CloseOptions(3000, null, CurrentSid, 555));
+        switch (change)
+        {
+            case "start": harness.StartTime = Started.AddSeconds(1); break;
+            case "owner": harness.Snapshot = [Activity(100, 3000, sid: "other")]; break;
+            case "exe": harness.Snapshot = [Activity(100, 3000, exe: @"C:\dev\other.exe")]; break;
+            case "peer": harness.Snapshot.Add(Activity(101, 3000)); break;
+        }
+        await Assert.ThrowsAsync<CloseRefusedException>(() => service.ExecuteCloseAsync(plan));
+        Assert.Equal(0, harness.Signalled);
+        Assert.Equal(0, harness.Waits);
+    }
+
 }

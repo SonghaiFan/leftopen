@@ -4,111 +4,56 @@ using System.Runtime.InteropServices;
 namespace LeftOpen.Core;
 
 /// <summary>
-/// The Windows stand-in for leftopen's SIGTERM-only rule. Windows has no per-process
-/// signal, so the gentle ladder is: (1) WM_CLOSE to the process's own window, then
-/// (2) console Ctrl+C followed by Ctrl+Break, delivered as if the user pressed the
-/// keys in the terminal hosting the process. Ctrl+Break matters because processes
-/// started in a new process group (e.g. PowerShell Start-Process) ignore Ctrl+C,
-/// while Ctrl+Break always gets through. Force-kill (taskkill /F, Process.Kill) is
-/// never used; a process that ignores everything is reported honestly instead.
+/// Only posts WM_CLOSE to a window owned by the target PID. Console control events
+/// are deliberately unsupported: Ctrl+C cannot target a group, and Ctrl+Break
+/// targets a group (including descendants), not a verified individual PID.
+/// LeftOpen did not create these processes and cannot prove their group scope.
 /// </summary>
 public static class ProcessTerminator
 {
-    private const uint CtrlCEvent = 0;
-    private const uint CtrlBreakEvent = 1;
-    private const uint AttachParentProcess = unchecked(uint.MaxValue);
+    public const string NoSafeCloseReason =
+        "No reachable window owned by the target PID. Console Ctrl+C / Ctrl+Break " +
+        "are disabled because their recipients cannot be restricted to the verified target; " +
+        "they could stop other services sharing its console or process group.";
 
-    /// <summary>Sends every gentle close signal we have. True when something was actually delivered.</summary>
+    /// <summary>True only if WM_CLOSE was posted, or the process already exited.</summary>
     public static bool TrySendGentleClose(int pid)
     {
-        var delivered = false;
-
         try
         {
             using var process = Process.GetProcessById(pid);
-            if (!process.HasExited && process.MainWindowHandle != 0)
+            if (process.HasExited)
             {
-                process.CloseMainWindow();
-                delivered = true;
+                return true;
             }
+
+            var window = process.MainWindowHandle;
+            // A console's visible window belongs to the console host, not the
+            // service. Never close that host (or another PID's window).
+            if (window == IntPtr.Zero ||
+                GetWindowThreadProcessId(window, out var ownerPid) == 0 ||
+                ownerPid != (uint)pid)
+            {
+                return false;
+            }
+
+            // Use the exact checked handle and report the native API result.
+            return PostMessage(window, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero);
         }
         catch (ArgumentException)
         {
-            // Process already exited — nothing to signal, but also nothing left to do.
-            return true;
+            return true; // Target already exited.
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Exited between enumeration and access, or details unavailable —
-            // the console path may still work.
-        }
-
-        if (TrySendConsoleCtrl(pid))
-        {
-            delivered = true;
-        }
-
-        return delivered;
-    }
-
-    private static bool TrySendConsoleCtrl(int pid)
-    {
-        var hadConsole = GetConsoleWindow() != IntPtr.Zero;
-        if (hadConsole && !FreeConsole())
-        {
             return false;
         }
-
-        if (!AttachConsole((uint)pid))
-        {
-            if (hadConsole)
-            {
-                AttachConsole(AttachParentProcess);
-            }
-
-            return false;
-        }
-
-        try
-        {
-            // A real handler that returns TRUE suppresses the default action for
-            // BOTH Ctrl+C and Ctrl+Break (the NULL-handler "ignore mode" only
-            // covers Ctrl+C), so the events we generate for that console do not
-            // terminate leftopen itself.
-            SetConsoleCtrlHandler(KeepAliveHandler, true);
-            GenerateConsoleCtrlEvent(CtrlCEvent, 0);
-            GenerateConsoleCtrlEvent(CtrlBreakEvent, 0);
-            Thread.Sleep(100);
-        }
-        finally
-        {
-            FreeConsole();
-            SetConsoleCtrlHandler(KeepAliveHandler, false);
-            if (hadConsole)
-            {
-                AttachConsole(AttachParentProcess);
-            }
-        }
-
-        return true;
     }
 
-    private delegate bool ConsoleCtrlDelegate(uint ctrlType);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
-    private static readonly ConsoleCtrlDelegate KeepAliveHandler = _ => true;
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetConsoleWindow();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool FreeConsole();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AttachConsole(uint processId);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate? handlerRoutine, bool add);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GenerateConsoleCtrlEvent(uint ctrlEvent, uint processGroup);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 }

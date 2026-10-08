@@ -87,20 +87,16 @@ Reason:     CWD is within a project root containing git at ...\.git.
 | `.app` 包识别应用 | 可执行文件位于 `Program Files` / `WindowsApps` / `%LOCALAPPDATA%\Programs` |
 | 系统目录 `/usr/bin` 等 | `C:\Windows` 树 |
 | `127.0.0.1` vs `0.0.0.0` | 同样区分 `LOCAL`（仅本机）/ `LAN`（局域网可见） |
-| 只发 SIGTERM | 温和关闭阶梯：WM_CLOSE → 控制台 Ctrl+C → Ctrl+Break |
+| 只发 SIGTERM | 仅向目标 PID 自己的窗口发送 WM_CLOSE；拒绝控制台广播 |
 | 菜单栏 `MenuBarExtra` | 系统托盘 `NotifyIcon` + 弹出面板 |
 
 `LeftOpen.Core` 是共享引擎，托盘应用与 CLI 用的是**完全相同**的扫描、推断与关闭规则。
 
-### 为什么关闭阶梯里要加 Ctrl+Break
+### 控制台关闭的安全边界
 
-Windows 没有 SIGTERM，最接近的“温柔”做法是模拟用户在那个终端里按键：
+`GenerateConsoleCtrlEvent(..., 0)` 会向共享控制台的所有进程广播。Ctrl+C 不能限定进程组；Ctrl+Break 可以限定组，但组包含后代，PID 也不等于已验证的组身份。现有扫描和 PID 身份复核无法证明所有接收者均已获准关闭，因此控制台信号路径已移除。
 
-1. `WM_CLOSE` —— 有自己窗口的进程（GUI 程序）。
-2. `AttachConsole` + `CTRL_C_EVENT` —— 等同于在该进程的终端里按 Ctrl+C，dev server（node/vite/next）会走正常的清理逻辑。
-3. `CTRL_BREAK_EVENT` —— 由 PowerShell `Start-Process` 等方式启动的进程会被放进**新进程组**，新进程组默认忽略 Ctrl+C；Ctrl+Break 不受这个忽略模式影响，能可靠送达。
-
-发送前，发送方会注册一个返回 `true` 的控制台事件处理器，确保这些事件不会把 LeftOpen 自己一起带走。
+仅在窗口确实属于已复核的目标 PID 时发送 `WM_CLOSE`，并检查发送结果。普通 node/python 控制台服务通常没有自己的窗口，因此会被安全拒绝；需要在原终端手动停止。即使用户确认或使用 `--yes`，也不会启用广播或强杀。
 
 ## 安全规则
 
@@ -110,7 +106,7 @@ Windows 没有 SIGTERM，最接近的“温柔”做法是模拟用户在那个�
 2. **复核**（防 PID 复用）：发信号前重新扫描，核对目标 PID 仍在该端口监听、没有出现新的持有者、用户 SID / 可执行路径 / **启动时间**都与预览时一致——任何一项变化都判定为“PID 被换人”，放弃并明确报告“未发送任何信号”。
 3. **执行**：发送温和信号后轮询最多 5 秒确认端口释放，结构化返回 `targetStoppedListening` / `portFree` / `remainingPids` / `signalsDelivered`。
 
-**从不强杀**（没有 `taskkill /F`，没有 `Process.Kill`）。进程不响应就如实报告；连温和信号都送不到（既无可达窗口也无控制台）时，也会明确说明“未送达，进程未受影响”。
+**从不强杀**（没有 `taskkill /F`，没有 `Process.Kill`）。进程不响应就如实报告；连温和信号都送不到（无可达的目标进程窗口）时，也会明确说明“未送达，进程未受影响”。
 
 ## 已知限制
 
@@ -145,3 +141,15 @@ dotnet test
 ## 致谢与许可
 
 设计与交互来自 [SonghaiFan/leftopen](https://github.com/SonghaiFan/leftopen)（MIT）。本移植版沿用同一理念与安全模型。
+
+### Windows 原生控制台回归探针
+
+在 Windows + .NET 8 SDK 中运行（退出码非零表示失败）：
+
+```powershell
+dotnet run --project tests/LeftOpen.ConsoleSafety.Probe
+```
+
+探针先分离调用者的控制台，再创建专用控制台和三个受控测试进程（共享组的服务、显式新组的服务、该新组中的后代）。只在确认控制台成员全部为这些测试进程后广播，并记录真实控制事件。检查广播范围、Ctrl+C 非零组行为、Ctrl+Break 组内后代范围，以及生产关闭路径拒绝所有控制台服务且没有事件送达。测试处理器拦截退出，finally 用停止文件让测试进程自行退出；不会向开发者的终端广播。
+
+此探针是待 Windows 实测的回归验证，不是现有 mock 单元测试的替代。Linux 代码审查不能证明其运行结果；合并或发布预览版前须保留 Windows 输出并运行 `dotnet test LeftOpen.sln`。

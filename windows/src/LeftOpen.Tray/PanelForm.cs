@@ -632,7 +632,7 @@ internal sealed class PanelForm : Form
 
         flow.Controls.Add(new Label
         {
-            Text = "将发送温和关闭（等同在该进程的终端里按 Ctrl+C），绝不使用强杀；若它不响应，会如实告诉你。",
+            Text = "只向目标进程自己的窗口发送温和关闭；控制台信号可能误停其他服务，已禁用。无目标窗口时会拒绝关闭，绝不强杀。",
             AutoSize = true,
             MaximumSize = new Size(PanelWidth - 40, 0),
             Margin = new Padding(16, 4, 16, 12),
@@ -692,7 +692,7 @@ internal sealed class PanelForm : Form
             }
             else if (!result.SignalsDelivered)
             {
-                label.Text = $"无法向 PID {group.Pid} 送达温和关闭（无可达的窗口或控制台），进程未受影响，未强杀。";
+                label.Text = $"未向 PID {group.Pid} 送达温和关闭：无可达的目标进程窗口。控制台信号可能影响共享控制台或进程组的其他服务，已拒绝发送。未强杀。";
             }
             else
             {
