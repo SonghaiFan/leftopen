@@ -8,6 +8,7 @@ struct SettingsView: View {
     @ObservedObject private var updates = UpdateChecker.shared
     @ObservedObject private var fixed = FixedAddressManager.shared
     @ObservedObject private var navigation = SettingsWindowController.shared
+    @ObservedObject private var uninstall = UninstallManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var didCopy = false
     @State private var doorOpen = true
@@ -39,6 +40,7 @@ struct SettingsView: View {
             case .about:
                 updateSettings
                 aboutSettings
+                uninstallSettings
             }
         }
         .formStyle(.grouped)
@@ -53,6 +55,25 @@ struct SettingsView: View {
             if navigation.section == .projects { Task { await fixed.refreshAddressSetup() } }
         }
         .onDisappear { volumePreviewTask?.cancel() }
+        .disabled(uninstall.isWorking)
+    }
+
+    private var uninstallSettings: some View {
+        Section {
+            if uninstall.isWorking {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(L("Uninstalling…", "正在卸载…"))
+                }
+            } else {
+                Button(L("Uninstall LeftOpen…", "卸载 LeftOpen…"), role: .destructive) {
+                    Task { await uninstall.uninstall() }
+                }
+            }
+            if let error = uninstall.error {
+                Text(error).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var generalSettings: some View {

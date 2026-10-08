@@ -146,6 +146,7 @@ final class FixedAddressManager: ObservableObject {
     private var consecutiveFailures = 0
     private var monitor: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
+    private var uninstalling = false
     private let storageKey = "leftopen.fixedAddressBindings.v2"
 
     private init() {
@@ -179,14 +180,34 @@ final class FixedAddressManager: ObservableObject {
         Task { await refreshAddressSetup() }
     }
 
+    func pauseForUninstall() async throws {
+        guard !isWorking else {
+            throw PortlessServiceError(message: L("Wait for the current project action to finish, then retry.", "请等待当前项目操作完成后重试。"))
+        }
+        uninstalling = true
+        guard !(await service.hasRunningProjects()) else {
+            throw PortlessServiceError(message: L("Stop projects started through LeftOpen before uninstalling.", "请先关闭通过 LeftOpen 启动的项目，再卸载。"))
+        }
+        monitor?.cancel()
+        await monitor?.value
+        monitor = nil
+        await engine.stop()
+    }
+
+    func resumeAfterUninstallFailure() {
+        uninstalling = false
+        startMonitor()
+        Task { await refreshAddressSetup() }
+    }
+
     func refreshAddressSetup() async {
-        guard !isWorking else { return }
+        guard !isWorking, !uninstalling else { return }
         addressSetupState = await service.available() ? .ready : (usesHTTPS ? .needsRepair : .needsSetup)
     }
 
     /// Only the Settings action can request system authorization.
     func configureAddresses() async {
-        guard !isWorking else { return }
+        guard !isWorking, !uninstalling else { return }
         isWorking = true
         setupError = nil
         defer { isWorking = false; startMonitor() }
@@ -221,7 +242,7 @@ final class FixedAddressManager: ObservableObject {
     private var resolvedActivities: [String: String] = [:]
 
     func enable(_ activity: Activity, name requestedName: String) async {
-        guard !isWorking else { return }
+        guard !isWorking, !uninstalling else { return }
         isWorking = true
         error = nil
         defer { isWorking = false; startMonitor() }
@@ -297,7 +318,7 @@ final class FixedAddressManager: ObservableObject {
 
     /// Remove the address and launcher without stopping the project's server.
     func disable(_ binding: FixedAddressBinding) async {
-        guard !isWorking else { return }
+        guard !isWorking, !uninstalling else { return }
         isWorking = true
         monitor?.cancel()
         await monitor?.value
@@ -328,7 +349,7 @@ final class FixedAddressManager: ObservableObject {
     }
 
     func moveShortcut(_ id: String, to target: String) {
-        guard !isWorking else { return }
+        guard !isWorking, !uninstalling else { return }
         let order = orderedBindings.map(\.id)
         let next = ProjectShortcutOrder.moving(id, to: target, in: order)
         guard next != order else { return }
@@ -342,7 +363,7 @@ final class FixedAddressManager: ObservableObject {
 
     private func startMonitor() {
         monitor?.cancel()
-        guard !bindings.isEmpty else { return }
+        guard !bindings.isEmpty, !uninstalling else { return }
         monitor = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -371,6 +392,7 @@ final class FixedAddressManager: ObservableObject {
     }
 
     private func reconcile(_ activities: [Activity], publish: Bool = true) async throws {
+        guard !uninstalling else { throw CancellationError() }
         if bindings.isEmpty {
             await engine.stop()
             if usesHTTPS { try? await service.replace([]) }
@@ -392,6 +414,7 @@ final class FixedAddressManager: ObservableObject {
             routes.append(FixedRoute(hostname: "\(binding.name).localhost", port: activity.listener.port, pid: activity.process.pid))
         }
         try Task.checkCancellation()
+        guard !uninstalling else { throw CancellationError() }
         let proxyPort = try await engine.replace(routes) // Keep existing HTTP bookmarks usable during migration.
         if usesHTTPS {
             guard await service.available() else {
@@ -426,7 +449,7 @@ final class FixedAddressManager: ObservableObject {
     }
 
     func start(_ binding: FixedAddressBinding) async {
-        guard !isWorking else { return }
+        guard !isWorking, !uninstalling else { return }
         isWorking = true
         error = nil
         defer { isWorking = false; startMonitor() }
