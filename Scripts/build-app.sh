@@ -46,13 +46,11 @@ else
 fi
 mkdir -p "${app_path}/Contents/Resources/Portless"
 cp -R "${project_dir}/.build/portless-runtime/." "${app_path}/Contents/Resources/Portless/"
-for architecture in arm64 x64; do
-  codesign --force --sign - --entitlements "${project_dir}/Resources/Portless/node-entitlements.plist" \
-    "${app_path}/Contents/Resources/Portless/node-${architecture}"
-done
+zsh "${project_dir}/Scripts/sign-portless-runtime.sh" "${app_path}/Contents/Resources/Portless"
 plutil -replace CFBundleIdentifier -string "$bundle_id" "${app_path}/Contents/Info.plist"
 # Sign nested code before the bundle, which signs the main executable too.
 codesign --force --sign - "${app_path}/Contents/MacOS/leftopen"
 codesign --force --sign - "$app_path"
 codesign --verify --deep --strict --all-architectures "$app_path"
+python3 "${project_dir}/Scripts/verify-portless-runtime.py" "${app_path}/Contents/Resources/Portless"
 print "Built ad-hoc signed app: $app_path"

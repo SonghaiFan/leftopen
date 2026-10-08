@@ -28,7 +28,26 @@ defaults:
     shell: bash
 
 jobs:
+  runtime:
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify hardened Node and Portless on native hardware
+        run: |
+          python3 Scripts/prepare-portless-runtime.py
+          zsh Scripts/sign-portless-runtime.sh .build/portless-runtime
+          python3 Scripts/verify-portless-runtime.py .build/portless-runtime
+
   release:
+    needs: runtime
     if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 45
@@ -136,6 +155,7 @@ jobs:
           app="$LEFTOPEN_OUTPUT_DIR/verified/LeftOpen.app"
           "$GITHUB_WORKSPACE/Scripts/verify-universal-app.sh" "$app"
           codesign --verify --deep --strict --all-architectures "$app"
+          python3 "$GITHUB_WORKSPACE/Scripts/verify-portless-runtime.py" "$app/Contents/Resources/Portless"
           xcrun stapler validate "$app"
           spctl --assess --type execute "$app"
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$VERSION" ]]
