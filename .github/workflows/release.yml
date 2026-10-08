@@ -7,6 +7,14 @@ on:
         description: 'New version (for example: 0.4.1)'
         required: true
         type: string
+      prerelease:
+        description: 'Beta only: do not update Latest or Homebrew'
+        type: boolean
+        default: false
+      beta_number:
+        description: 'Beta sequence number (used only for prereleases)'
+        type: string
+        default: '1'
 
 concurrency:
   group: leftopen-release
@@ -31,6 +39,8 @@ jobs:
       sha256: ${{ steps.archive.outputs.sha256 }}
     env:
       VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      BETA_NUMBER: ${{ inputs.beta_number }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       LEFTOPEN_BUNDLE_ID: app.leftopen.mac
@@ -69,6 +79,11 @@ jobs:
           latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)"
           python3 Scripts/prepare-release.py "$VERSION" "$((1000 + GITHUB_RUN_NUMBER))" --latest "$latest"
           tag="v$VERSION"
+          if [[ "$PRERELEASE" == true ]]; then
+            [[ "$BETA_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo '::error::Invalid beta sequence number.'; exit 1; }
+            tag="$tag-beta.$BETA_NUMBER"
+          fi
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           if git show-ref --verify --quiet "refs/tags/$tag"; then
             if [[ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ]]; then
               echo '::error::This version tag belongs to another commit.'
@@ -128,7 +143,7 @@ jobs:
 
       - name: Publish verified release
         run: |
-          tag="v$VERSION"
+          tag="$RELEASE_TAG"
           # A network/auth error must not be treated as an absent release.
           releases="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | [.tag_name, .draft] | @tsv')"
           state="$(printf '%s\n' "$releases" | awk -F '\t' -v tag="$tag" '$1 == tag { print $2 }')"
@@ -137,14 +152,22 @@ jobs:
             exit 1
           fi
           if [[ -z "$state" ]]; then
+            channel_args=()
+            if [[ "$PRERELEASE" == true ]]; then
+              channel_args=(--prerelease --latest=false)
+            fi
             gh release create "$tag" --target "$GITHUB_SHA" --draft \
-              --title "LeftOpen $tag" --generate-notes
+              --title "LeftOpen $tag" --generate-notes "${channel_args[@]}"
           else
             target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish)"
             [[ "$target" == "$GITHUB_SHA" ]] || { echo '::error::Draft belongs to another commit.'; exit 1; }
           fi
           gh release upload "$tag" "$LEFTOPEN_OUTPUT_DIR/LeftOpen-release.zip" "$LEFTOPEN_OUTPUT_DIR/SHA256SUMS" --clobber
-          gh release edit "$tag" --draft=false --latest
+          if [[ "$PRERELEASE" == true ]]; then
+            gh release edit "$tag" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$tag" --draft=false --prerelease=false --latest
+          fi
           echo "Published [$tag](https://github.com/$GH_REPO/releases/tag/$tag)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove temporary signing credentials
@@ -157,6 +180,7 @@ jobs:
 
   homebrew:
     needs: release
+    if: ${{ !inputs.prerelease }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

@@ -228,6 +228,9 @@ final class FixedAddressManager: ObservableObject {
         let previous = bindings
         var changedRoutes = false
         do {
+            if let blocker = FixedAddressEligibility.identityBlocker(for: activity, currentUID: Int32(getuid())) {
+                throw FixedAddressError(message: blocker.message)
+            }
             guard let project = activity.projectMarker, let executable = activity.process.executablePath,
                   activity.process.uid == Int32(getuid()), FixedAddressBinding.supportsLoopback(activity) else {
                 throw FixedAddressError(message: L("Select a local web service with a known project.", "请选择归属明确的本地 Web 服务。"))

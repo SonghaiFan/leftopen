@@ -9,6 +9,14 @@ verifies the final ZIP, publishes a Release with generated notes, and updates
 Homebrew's version and checksum. Notes can be edited on GitHub afterward.
 Runner availability and Apple notarization affect elapsed time.
 
+For a beta, set `prerelease` to true and choose `beta_number` (starting at 1).
+Version `0.5.3` with beta number `1` publishes `v0.5.3-beta.1`, explicitly marked
+as a prerelease and not Latest. Homebrew is skipped and the app's stable update
+checker remains on the previous stable release. The app/CLI version remains the
+numeric `0.5.3`; its increasing build number distinguishes beta builds. Download
+the beta from its explicit release page. Increase the beta number for a new beta;
+do not overwrite a published archive. Stable releases use the default inputs.
+
 ## One-time configuration
 
 In **Settings → Secrets and variables → Actions**, add these repository secrets:

@@ -12,10 +12,10 @@ struct PortlessProjectView: View {
 
     private var binding: FixedAddressBinding? { fixed.binding(for: activity) }
     private var managedURL: URL? { binding.flatMap { fixed.urls[$0.id] } }
-    private var eligible: Bool {
-        activity.projectMarker != nil && activity.process.executablePath != nil && webURL?.scheme == "http"
-            && FixedAddressBinding.supportsLoopback(activity)
+    private var blocker: FixedAddressEligibility.Blocker? {
+        FixedAddressEligibility.blocker(for: activity, webURL: webURL, currentUID: Int32(getuid()))
     }
+    private var eligible: Bool { blocker == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -53,7 +53,7 @@ struct PortlessProjectView: View {
                      ? (fixed.addressesReady
                         ? L("Ready to use. No separate installation needed.", "已就绪，无需另行安装。")
                         : L("Complete local address setup once in Settings.", "在设置中集中完成首次本地地址授权。"))
-                     : L("Available for local HTTP services with a known project.", "适用于归属明确的本地 HTTP Web 服务。"))
+                     : (blocker?.message ?? ""))
                     .font(AppAppearance.secondary).foregroundStyle(.secondary)
             }
             if fixed.isWorking {

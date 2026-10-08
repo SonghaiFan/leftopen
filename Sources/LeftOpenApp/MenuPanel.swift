@@ -210,9 +210,8 @@ struct MenuPanel: View {
     private func fixedAddressAction(for activity: Activity) -> (() -> Void)? {
         let binding = fixed.binding(for: activity)
         guard !fixed.isWorking,
-              binding != nil || (activity.projectMarker != nil && activity.process.executablePath != nil &&
-                activity.process.uid == Int32(getuid()) && webURLs[activity.id]?.scheme == "http" &&
-                FixedAddressBinding.supportsLoopback(activity)) else { return nil }
+              binding != nil || FixedAddressEligibility.blocker(for: activity,
+                webURL: webURLs[activity.id], currentUID: Int32(getuid())) == nil else { return nil }
         return {
             if let binding {
                 Task { await fixed.disable(binding) }
@@ -1482,7 +1481,8 @@ private struct PortRow: View {
                 Image(systemName: isAddress ? "link" : action == .close ? "xmark.circle.fill" : "lock.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .scaleEffect(armed ? 1.15 : 1)
-                Text(isAddress ? (fixedName == nil ? L("Fixed address", "固定地址") : L("Unlink", "停用地址"))
+                Text(action == .addressUnavailable ? L("Unavailable · see details", "不可用 · 查看详情")
+                     : isAddress ? (fixedName == nil ? L("Fixed address", "固定地址") : L("Unlink", "停用地址"))
                      : closeFailed ? L("Force Close", "强制关闭") : L("Close", "关闭"))
                     .font(.system(size: 11, weight: .semibold))
             }

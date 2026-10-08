@@ -133,7 +133,7 @@ actor PortlessService {
 
     private func certificateTrusted() -> Bool {
         let certificate = Self.directory.appendingPathComponent("ca.pem")
-        guard FileManager.default.fileExists(atPath: certificate.path) else { return false }
+        guard AddressSetupPolicy.certificateFile(at: certificate.path) == .readable else { return false }
         let check = Process()
         check.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         check.arguments = ["verify-cert", "-c", certificate.path, "-L", "-p", "ssl"]
@@ -149,10 +149,7 @@ actor PortlessService {
         // which cannot read a password from this app's closed stdin. Trust only the existing
         // CA; invoking `trust` also regenerates certificates and can leave a running proxy stale.
         let certificate = Self.directory.appendingPathComponent("ca.pem")
-        guard FileManager.default.fileExists(atPath: certificate.path) else {
-            throw PortlessServiceError(message: L("The local certificate is missing. Retry local address setup.",
-                                                  "本地证书缺失，请重试本地地址设置。"))
-        }
+        try requireReadableCertificate(certificate)
         await MainActor.run { NSApplication.shared.activate(ignoringOtherApps: true) }
         let script = CertificateAuthorization.script(certificatePath: certificate.path,
             prompt: L("Trust LeftOpen's local HTTPS certificate for project addresses.",
@@ -195,7 +192,10 @@ actor PortlessService {
     func prepare() async throws {
         if await available() { return }
         // Repair only the missing step. Repeated attempts must not reinstall a working daemon.
-        if installedForCurrentUser() && !certificateTrusted() {
+        let certificate = Self.directory.appendingPathComponent("ca.pem")
+        if AddressSetupPolicy.nextAction(installed: installedForCurrentUser(),
+            certificate: AddressSetupPolicy.certificateFile(at: certificate.path),
+            trusted: certificateTrusted()) == .trustExisting {
             try await trustForCurrentUser()
             if await available() { return }
         }
@@ -219,29 +219,43 @@ actor PortlessService {
             try task.run()
             let diagnostic = String(decoding: failure.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             task.waitUntilExit()
-            let code = diagnostic.contains("(-128)") ? "cancelled"
-                : diagnostic.contains("portBusy") ? "portBusy"
-                : diagnostic.contains("unsafePath") || diagnostic.contains("unsafeRuntime") ? "unsafePath"
-                : diagnostic.contains("differentOwner") ? "differentOwner" : "failed"
+            let code = AddressSetupPolicy.installationFailure(diagnostic)
             return (task.terminationStatus, code)
         }.value
         guard result.0 == 0 else {
             let message: String
-            switch result.1 {
+            switch result.1.split(separator: ":").first.map(String.init) ?? "failed" {
             case "cancelled": message = L("Setup was cancelled. Retry when ready.", "设置已取消，准备好后可重试。")
             case "portBusy": message = L("Another service is using the HTTPS address port. Close it before retrying.", "其他服务正在占用 HTTPS 地址端口，请关闭该服务后重试。")
             case "differentOwner": message = L("The address service belongs to another user. Your project is unchanged.", "地址服务属于其他用户，项目未作改动。")
-            case "unsafePath": message = L("The address service files could not be safely installed. Your project is unchanged.", "无法安全安装地址服务文件，项目未作改动。")
+            case "unsafePath", "unsafeRuntime", "invalidOwner": message = L("The address service files could not be safely installed. Your project is unchanged.", "无法安全安装地址服务文件，项目未作改动。")
+            case "userDirectoryRepairFailed": message = L("Could not repair access to the local address folder. Retry setup with administrator authorization.", "无法修复本地地址目录的访问权限，请重试并完成管理员授权。")
+            case "launchdEnableFailed": message = L("macOS could not re-enable the address service (\(result.1)). Retry setup.", "macOS 未能重新启用地址服务（\(result.1)），请重试设置。")
+            case "serviceInstallFailed": message = L("The address service could not be installed (\(result.1)). Retry setup.", "地址服务安装失败（\(result.1)），请重试设置。")
+            case "setupTimedOut": message = L("Address setup timed out. Retry and complete the macOS authorization prompts.", "地址设置超时，请重试并完成 macOS 授权弹窗。")
             default: message = L("The background address service could not be installed. Retry to authorize setup.", "后台地址服务未能安装，请重试并完成系统授权。")
             }
             throw PortlessServiceError(message: message)
         }
+        try requireReadableCertificate(certificate)
         if !certificateTrusted() { try await trustForCurrentUser() }
         for _ in 0..<20 {
             if await available() { return }
             try await Task.sleep(for: .milliseconds(250))
         }
         throw PortlessServiceError(message: L("HTTPS is not ready yet. Try again shortly.", "HTTPS 尚未就绪，请稍后重试。"))
+    }
+
+    private func requireReadableCertificate(_ certificate: URL) throws {
+        let message: String
+        switch AddressSetupPolicy.certificateFile(at: certificate.path) {
+        case .readable: return
+        case .missing: message = L("The local certificate is missing after setup. Retry local address setup.", "设置后仍未找到本地证书，请重试本地地址设置。")
+        case .inaccessible: message = L("The local certificate cannot be read because of folder or file permissions. Retry setup to repair access.", "本地证书因目录或文件权限无法读取，请重试设置以修复访问权限。")
+        case .unsafe: message = L("The local certificate path is not a regular file. Setup was stopped for safety.", "本地证书路径不是普通文件，已停止设置。")
+        case .unavailable: message = L("The local certificate could not be read. Retry local address setup.", "暂时无法读取本地证书，请重试本地地址设置。")
+        }
+        throw PortlessServiceError(message: message)
     }
 
     func replace(_ routes: [ServiceRoute]) throws {

@@ -80,4 +80,21 @@ final class FixedAddressTests: XCTestCase {
         XCTAssertEqual(ProjectShortcutOrder.moving("home", to: "home", in: order), order)
     }
 
+    func testFixedAddressEntryExplainsGlobalPackagesWithoutRelaxingProjectRequirement() {
+        let original = activity(port: 30141)
+        let process = ProcessFact(pid: 42, ppid: nil, command: "next-server", executablePath: "/opt/homebrew/bin/node",
+            uid: Int32(getuid()), user: "test", cwd: "/opt/homebrew/lib/node_modules/@agegr/pi-web")
+        let global = Activity(listener: original.listener, process: process, parentChain: [], projectMarker: nil,
+            applicationBundle: nil, scope: .local, inference: original.inference)
+        let url = URL(string: "http://127.0.0.1:30141")!
+        XCTAssertEqual(FixedAddressEligibility.blocker(for: global, webURL: url, currentUID: Int32(getuid())), .packageDirectory)
+        XCTAssertEqual(FixedAddressEligibility.identityBlocker(for: global, currentUID: Int32(getuid())), .packageDirectory)
+        XCTAssertFalse(FixedAddressEligibility.Blocker.packageDirectory.message.isEmpty)
+        XCTAssertEqual(FixedAddressEligibility.blocker(for: global, webURL: url, currentUID: -1), .differentUser)
+        XCTAssertNil(FixedAddressEligibility.blocker(for: original, webURL: url, currentUID: Int32(getuid())))
+        XCTAssertEqual(FixedAddressEligibility.blocker(for: original, webURL: nil, currentUID: Int32(getuid())), .unverifiedHTTP)
+        XCTAssertEqual(FixedAddressEligibility.blocker(for: original,
+            webURL: URL(string: "https://localhost:30141"), currentUID: Int32(getuid())), .unverifiedHTTP)
+    }
+
 }
