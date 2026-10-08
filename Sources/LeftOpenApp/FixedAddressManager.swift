@@ -142,6 +142,14 @@ final class FixedAddressManager: ObservableObject {
     @Published private(set) var addressSetupState: AddressSetupState = .checking
     @Published private(set) var setupError: String?
     @Published private(set) var setupDiagnostic: FailureDiagnostics?
+    @Published private(set) var proxyHTTPSPort = PortlessConfiguration.savedPort()
+    var bundledRuntimeVersion: String {
+        guard let data = try? Data(contentsOf: FixedAddressEngine.runtime.appendingPathComponent("runtime-lock.json")),
+              let lock = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = lock["portlessVersion"] as? String,
+              let node = lock["nodeVersion"] as? String else { return "Unknown" }
+        return "Portless \(version) · Node \(node)"
+    }
     var addressesReady: Bool { addressSetupState == .ready }
     private var selectedServices: [String: Activity] = [:]
     private var consecutiveFailures = 0
@@ -207,14 +215,26 @@ final class FixedAddressManager: ObservableObject {
     }
 
     /// Only the Settings action can request system authorization.
-    func configureAddresses() async {
+    func configureAddresses(port: Int? = nil) async {
         guard !isWorking, !uninstalling else { return }
         isWorking = true
         setupError = nil
         setupDiagnostic = nil
         defer { isWorking = false; startMonitor() }
         do {
-            try await service.prepare()
+            let requestedPort = port ?? proxyHTTPSPort
+            guard PortlessConfiguration.validPort(requestedPort) else {
+                throw FixedAddressError(message: L("Choose a port from 1–65535, excluding 1355–1365 reserved by LeftOpen.", "请选择 1–65535 范围内的端口，避开 LeftOpen 保留的 1355–1365。"))
+            }
+            if requestedPort != proxyHTTPSPort {
+                guard !(await service.hasRunningProjects()) else {
+                    throw FixedAddressError(message: L("Stop projects started through LeftOpen before changing the proxy port.", "更改代理端口前，请先停止通过 LeftOpen 启动的项目。"))
+                }
+            }
+            monitor?.cancel(); await monitor?.value; monitor = nil
+            try await service.prepare(port: requestedPort)
+            proxyHTTPSPort = requestedPort
+            UserDefaults.standard.set(requestedPort, forKey: PortlessConfiguration.portKey)
             addressSetupState = .ready
             usesHTTPS = true
             UserDefaults.standard.set(true, forKey: "leftopen.fixedAddressHTTPS")
@@ -223,7 +243,8 @@ final class FixedAddressManager: ObservableObject {
                 try? await reconcile(fresh)
             }
         } catch {
-            addressSetupState = usesHTTPS ? .needsRepair : .needsSetup
+            addressSetupState = await service.available() ? .ready : (usesHTTPS ? .needsRepair : .needsSetup)
+            if !addressesReady { urls = [:]; publishCatalog() }
             setupError = error.localizedDescription
             setupDiagnostic = (error as? PortlessServiceError)?.diagnostic
                 ?? FailureDiagnostics(stage: "address.setup", code: "failed", error: error as NSError)
@@ -431,7 +452,8 @@ final class FixedAddressManager: ObservableObject {
         try Task.checkCancellation()
         urls = Dictionary(uniqueKeysWithValues: bindings.compactMap { binding in
             guard selected[binding.id] != nil,
-                  let url = URL(string: usesHTTPS ? "https://\(binding.name).localhost" : "http://\(binding.name).localhost:\(proxyPort)") else { return nil }
+                  let url = usesHTTPS ? PortlessConfiguration.address(host: "\(binding.name).localhost", port: proxyHTTPSPort)
+                    : URL(string: "http://\(binding.name).localhost:\(proxyPort)") else { return nil }
             return (binding.id, url)
         })
         resolvedActivities = selected.mapValues(\.id)

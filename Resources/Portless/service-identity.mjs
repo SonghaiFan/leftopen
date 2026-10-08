@@ -1,6 +1,7 @@
 // Root-owned launchd metadata is the recovery authority, not a user-writable PID file.
 import fs from 'node:fs';
 import { commandDiagnostic } from './diagnostics.mjs';
+import { proxyPort } from './proxy-config.mjs';
 export const label = 'app.leftopen.portless.proxy';
 export const runtime = '/Library/Application Support/LeftOpen/Portless';
 export const plist = `/Library/LaunchDaemons/${label}.plist`;
@@ -8,10 +9,13 @@ const target = `system/${label}`;
 
 export function validateService(value, home) {
   const args = value.ProgramArguments;
-  const tail = [`${runtime}/package/dist/cli.js`, 'proxy', 'start', '--foreground', '--port', '443', '--https', '--skip-trust'];
+  let port;
+  try { port = proxyPort(args?.[6]); } catch { throw new Error('differentOwner'); }
+  const tail = [`${runtime}/package/dist/cli.js`, 'proxy', 'start', '--foreground', '--port', String(port), '--https', '--skip-trust'];
   if (value.Label !== label || !Array.isArray(args) ||
       ![`${runtime}/node-arm64`, `${runtime}/node-x64`].includes(args[0]) ||
       JSON.stringify(args.slice(1)) !== JSON.stringify(tail) ||
+      (value.EnvironmentVariables?.PORTLESS_PORT !== undefined && value.EnvironmentVariables.PORTLESS_PORT !== String(port)) ||
       value.EnvironmentVariables?.PORTLESS_STATE_DIR !== `${home}/Library/Application Support/LeftOpen/Portless`) {
     throw new Error('differentOwner');
   }
@@ -64,12 +68,12 @@ export function ownedService(home, run, io = fs) {
     const match = process.stdout?.trim().match(/^(\d+)\s+(.+)$/);
     if (!successful(process) || !match || Number(match[1]) !== 0 || match[2] !== args[0]) throw new Error('unsafeService');
   } else if (field('state') === 'running') throw new Error('unsafeService');
-  return {pid, executable: args[0]};
+  return {pid, executable: args[0], port: Number(args[6])};
 }
 
-export function assertOwnedHTTPSListener(service, run) {
-  if (!service?.pid) throw new Error('portBusy');
-  const result = run('/usr/sbin/lsof', ['-nP', '-a', '-iTCP:443', '-sTCP:LISTEN', '-Fp']);
+export function assertOwnedHTTPSListener(service, run, port = service?.port ?? 443) {
+  if (!service?.pid || service.port !== port) throw new Error('portBusy');
+  const result = run('/usr/sbin/lsof', ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp']);
   if (!successful(result)) throw new Error('portBusy');
   const pids = result.stdout.split('\n').filter(line => /^p\d+$/.test(line)).map(line => Number(line.slice(1)));
   if (!pids.length || pids.some(pid => pid !== service.pid)) throw new Error('portBusy');

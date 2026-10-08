@@ -24,6 +24,7 @@ actor PortlessService {
     private let runtime: URL
     private let node: URL
     private var jobs: [String: Process] = [:]
+    private var proxyPort = PortlessConfiguration.savedPort()
 
     init(runtime: URL, node: URL) { self.runtime = runtime; self.node = node }
 
@@ -32,7 +33,8 @@ actor PortlessService {
     private var environment: [String: String] {
         ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
          "HOME": NSHomeDirectory(), "PORTLESS_STATE_DIR": Self.directory.path,
-         "PORTLESS_SYNC_HOSTS": "1", "PORTLESS_LAN": "0", "NO_COLOR": "1"]
+         "PORTLESS_SYNC_HOSTS": "1", "PORTLESS_LAN": "0", "NO_COLOR": "1",
+         "PORTLESS_PORT": String(proxyPort), "PORTLESS_HTTPS": "1"]
     }
 
     private func command(_ arguments: [String], cwd: String? = nil, input: Data? = nil) throws -> Data {
@@ -94,7 +96,7 @@ actor PortlessService {
               let env = value["EnvironmentVariables"] as? [String: String], env["PORTLESS_STATE_DIR"] == Self.directory.path,
               let arguments = value["ProgramArguments"] as? [String],
               arguments.first?.hasPrefix("/Library/Application Support/LeftOpen/Portless/node-") == true,
-              arguments.count > 1 else { return false }
+              arguments.count > 6, arguments[6] == String(proxyPort) else { return false }
         return true
     }
 
@@ -118,17 +120,18 @@ actor PortlessService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         listener.waitUntilExit()
         guard listener.terminationStatus == 0, executable == expectedNode else { return false }
-        return await Self.healthy()
+        return await Self.healthy(port: proxyPort)
     }
 
-    private static func healthy() async -> Bool {
+    private static func healthy(port: Int) async -> Bool {
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false
         config.urlCredentialStorage = nil
         config.urlCache = nil
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        var request = URLRequest(url: URL(string: "https://localhost/")!, timeoutInterval: 2)
+        guard let url = PortlessConfiguration.address(host: "localhost", port: port) else { return false }
+        var request = URLRequest(url: url, timeoutInterval: 2)
         request.httpMethod = "HEAD"
         do {
             let (_, response) = try await session.data(for: request)
@@ -216,22 +219,29 @@ actor PortlessService {
         }
     }
 
-    func prepare() async throws {
-        if await available() { return }
+    func prepare(port: Int = PortlessConfiguration.savedPort()) async throws {
+        guard PortlessConfiguration.validPort(port) else {
+            throw PortlessServiceError(message: L("Choose a valid HTTPS proxy port.", "请选择有效的 HTTPS 代理端口。"))
+        }
+        let previousPort = proxyPort
+        var prepared = false
+        proxyPort = port
+        defer { if !prepared { proxyPort = previousPort } }
+        if await available() { prepared = true; return }
         // Repair only the missing step. Repeated attempts must not reinstall a working daemon.
         let certificate = Self.directory.appendingPathComponent("ca.pem")
         if AddressSetupPolicy.nextAction(installed: installedForCurrentUser(),
             certificate: AddressSetupPolicy.certificateFile(at: certificate.path),
             trusted: certificateTrusted()) == .trustExisting {
             try await trustForCurrentUser()
-            if await available() { return }
+            if await available() { prepared = true; return }
         }
         let source = runtime
         let executable = node
         let result = try await Task.detached(priority: .utility) {
             func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             let args = [executable.path, source.appendingPathComponent("setup.mjs").path, source.path,
-                        NSHomeDirectory(), NSUserName(), String(getuid()), String(getgid())]
+                        NSHomeDirectory(), NSUserName(), String(getuid()), String(getgid()), String(port)]
             let command = args.map(quote).joined(separator: " ")
             let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let task = Process()
@@ -254,7 +264,8 @@ actor PortlessService {
             let message: String
             switch result.1.split(separator: ":").first.map(String.init) ?? "failed" {
             case "cancelled": message = L("Setup was cancelled. Retry when ready.", "设置已取消，准备好后可重试。")
-            case "portBusy": message = L("Another service is using the HTTPS address port. Close it before retrying.", "其他服务正在占用 HTTPS 地址端口，请关闭该服务后重试。")
+            case "portBusy": message = L("HTTPS port \(port) is occupied or its owner could not be confirmed. Choose another proxy port or stop the conflicting service, then retry.", "HTTPS 端口 \(port) 已被占用或无法确认归属。可更换代理端口，或停止冲突服务后重试。")
+            case "invalidPort": message = L("Choose a port from 1–65535, excluding 1355–1365 reserved by LeftOpen.", "请选择 1–65535 范围内的端口，避开 LeftOpen 保留的 1355–1365。")
             case "differentOwner": message = L("The address service belongs to another user. Your project is unchanged.", "地址服务属于其他用户，项目未作改动。")
             case "unsafeService", "serviceCheckFailed", "serviceChanged": message = L("The existing address service could not be safely identified. No unrelated service was stopped. Retry setup.", "无法安全确认现有地址服务的归属，未停止其他服务。请重试设置。")
             case "serviceStopFailed": message = L("LeftOpen's previous address service could not be stopped. Retry setup.", "未能停止 LeftOpen 的旧地址服务，请重试设置。")
@@ -273,7 +284,7 @@ actor PortlessService {
         try requireReadableCertificate(certificate)
         if !certificateTrusted() { try await trustForCurrentUser() }
         for _ in 0..<20 {
-            if await available() { return }
+            if await available() { prepared = true; return }
             try await Task.sleep(for: .milliseconds(250))
         }
         throw PortlessServiceError(message: L("HTTPS is not ready yet. Try again shortly.", "HTTPS 尚未就绪，请稍后重试。"),
@@ -323,7 +334,7 @@ actor PortlessService {
         var env = environment
         // Reuse the observed runtime's bin directory, without reconstructing shell commands or persisting argv.
         env["PATH"] = URL(fileURLWithPath: binding.executablePath).deletingLastPathComponent().path + ":" + env["PATH"]!
-        env["PORTLESS_PORT"] = "443"
+        env["PORTLESS_PORT"] = String(proxyPort)
         env["PORTLESS_HTTPS"] = "1"
         env["CI"] = "1" // No hidden terminal prompts; setup must already be complete.
         task.environment = env

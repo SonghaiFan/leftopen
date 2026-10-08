@@ -68,7 +68,7 @@ brew install --cask songhaifan/tap/leftopen
 
 开发服务器的端口会变，地址可以不变。LeftOpen 内置 [Portless](https://github.com/vercel-labs/portless) 0.15.7 和 Node 24.14.0，无需另外安装。
 
-1. **首次设置：** **设置 → 项目 → 本地项目地址 → 完成首次设置**。macOS 会请求授权，用于信任本地 CA、安装只监听本机的 443 HTTPS 服务，并管理精确的 `/etc/hosts` 条目。只有设置页的这个按钮会请求授权；项目操作和后台扫描都不会。
+1. **首次设置：** **设置 → 项目 → 固定地址 → 设置**。macOS 会请求授权，用于信任本地 CA、在所选代理端口（默认 443）安装只监听本机的 HTTPS 服务，并管理精确的 `/etc/hosts` 条目。只有设置页的设置/应用按钮会请求授权；项目操作和后台扫描都不会。
 2. **每个项目：** 照常启动项目，在端口详情点击 **启用固定地址**，即可通过 `https://myapp.localhost` 访问。
 
 工作方式：
@@ -79,6 +79,8 @@ brew install --cask songhaifan/tap/leftopen
 - **供 Agent 与脚本使用：** `leftopen url [名称|端口|路径]` 输出已确认的地址（加 `--json` 获取结构化结果），`leftopen --json` 为对应服务增加 `fixedURL`。
 
 已有的 HTTP 地址继续可用，可在同一设置页完成 HTTPS 升级。Portless（Apache-2.0）与 Node 随附各自的许可证。
+
+**代理设置：**「设置 → 项目 → Portless」显示内置版本，并允许选择 HTTPS 代理端口。独立 Portless 占用 443 时，可选择 8443 等空闲端口，地址会相应显示为 `https://myapp.localhost:8443`。点击应用后重新设置 LeftOpen 服务；若目标端口被占用，会在停止旧服务前拒绝迁移。更改端口前需停止通过 LeftOpen 启动的项目。1355–1365 为旧 HTTP 引擎保留端口。
 
 ---
 

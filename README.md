@@ -68,7 +68,7 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 
 Dev servers move between ports; their address doesn't have to. LeftOpen bundles [Portless](https://github.com/vercel-labs/portless) 0.15.7 and Node 24.14.0, so there's nothing extra to install.
 
-1. **One-time setup:** **Settings → Projects → Local project addresses → Set up once.** macOS asks for authorization to trust a local CA, install a loopback-only HTTPS service on port 443, and manage exact `/etc/hosts` entries. Only this Settings button ever asks; project actions and background scans never do.
+1. **One-time setup:** **Settings → Projects → Fixed addresses → Set Up.** macOS asks for authorization to trust a local CA, install a loopback-only HTTPS service on the selected proxy port (443 by default), and manage exact `/etc/hosts` entries. Only the Settings setup/apply buttons ask; project actions and background scans never do.
 2. **Per project:** start the project as usual, then click **Enable fixed address** in its port details. It's reachable at `https://myapp.localhost`.
 
 How it behaves:
@@ -79,6 +79,8 @@ How it behaves:
 - **For agents and scripts:** `leftopen url [name|port|path]` prints verified addresses (`--json` for structured output), and `leftopen --json` includes `fixedURL` for matching services.
 
 Earlier HTTP addresses keep working; finish the HTTPS upgrade from the same Settings page. Portless (Apache-2.0) and Node ship with their licenses.
+
+**Proxy settings:** Settings → Projects → Portless shows the bundled versions and lets you choose the HTTPS proxy port. If an independent Portless instance uses 443, choose a free port such as 8443; addresses then include it (`https://myapp.localhost:8443`). Apply the setting to reconfigure LeftOpen's service. A busy target port is rejected before stopping the old service. Stop projects launched through LeftOpen before changing the proxy port. Ports 1355–1365 are reserved for the legacy HTTP engine.
 
 ---
 

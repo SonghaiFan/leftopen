@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var doorOpen = true
     @State private var volumePreviewTask: Task<Void, Never>?
     @State private var previewSoundToggle = false
+    @State private var proxyPortText = ""
 
     private var motion: Animation {
         reduceMotion ? .easeInOut(duration: 0.2) : .snappy(duration: 0.28)
@@ -35,6 +36,7 @@ struct SettingsView: View {
                 allowlistSettings
             case .projects:
                 addressSettings
+                proxySettings
             case .behavior:
                 closingSettings
                 soundSettings
@@ -51,6 +53,8 @@ struct SettingsView: View {
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
         .task { await fixed.refreshAddressSetup() }
+        .onAppear { proxyPortText = String(fixed.proxyHTTPSPort) }
+        .onChange(of: fixed.proxyHTTPSPort) { proxyPortText = String(fixed.proxyHTTPSPort) }
         .onChange(of: navigation.section) {
             volumePreviewTask?.cancel()
             if navigation.section == .projects { Task { await fixed.refreshAddressSetup() } }
@@ -238,9 +242,56 @@ struct SettingsView: View {
             }
         } header: {
             sectionHeader(L("Project Addresses", "项目地址"),
-                help: L("Stable addresses like https://myapp.localhost that follow a project across ports. Setup asks macOS once to trust a local certificate, run a loopback-only service on port 443, and manage exact hosts entries (“osascript” and “security” may ask separately). Project files are never changed; hiding projects keeps their addresses.",
-                        "使用 https://myapp.localhost 这样的固定地址，端口变化后自动跟随。首次设置会向 macOS 请求一次授权：信任本地证书、运行只监听本机的 443 服务、管理精确的 hosts 条目（「osascript」和「security」可能分别弹窗）。不修改项目文件；隐藏项目不会停用地址。"))
+                help: L("Stable addresses that follow a project across ports. Setup asks macOS to trust a local certificate, run a loopback-only HTTPS proxy on your chosen port, and manage exact hosts entries. Hiding projects keeps their addresses.",
+                        "固定地址会随项目端口变化自动跟随。设置会向 macOS 请求授权：信任本地证书、在指定端口运行只监听本机的 HTTPS 代理，并管理精确的 hosts 条目。隐藏项目不会停用地址。"))
         }
+    }
+
+    private var proposedProxyPort: Int? {
+        guard let port = Int(proxyPortText), PortlessConfiguration.validPort(port) else { return nil }
+        return port
+    }
+
+    private var proxySettings: some View {
+        Section {
+            LabeledContent(L("HTTPS proxy port", "HTTPS 代理端口")) {
+                TextField("443", text: $proxyPortText)
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 75)
+                    .accessibilityLabel(L("HTTPS proxy port", "HTTPS 代理端口"))
+            }
+            if let port = proposedProxyPort,
+               let example = PortlessConfiguration.address(host: "myapp.localhost", port: port) {
+                Text(example.absoluteString)
+                    .font(AppAppearance.secondary).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            } else {
+                Text(L("Use 1–65535; 1355–1365 are reserved by LeftOpen.", "可使用 1–65535；1355–1365 为 LeftOpen 保留端口。"))
+                    .font(AppAppearance.secondary).foregroundStyle(.orange)
+            }
+            Text(L("If another Portless or HTTPS proxy uses 443, choose a free port such as 8443. Applying restarts LeftOpen's address service and may ask for macOS authorization.",
+                   "若其他 Portless 或 HTTPS 代理占用 443，可选择 8443 等空闲端口。应用会重新设置 LeftOpen 地址服务，并可能请求 macOS 授权。"))
+                .font(AppAppearance.secondary).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button(L("Use default", "使用默认值")) { proxyPortText = "443" }
+                    .disabled(proxyPortText == "443")
+                Spacer()
+                Button(L("Apply and Set Up…", "应用并设置…")) {
+                    guard let port = proposedProxyPort else { return }
+                    Task { await fixed.configureAddresses(port: port) }
+                }
+                .disabled(proposedProxyPort == nil || (fixed.addressesReady && proposedProxyPort == fixed.proxyHTTPSPort))
+            }
+            LabeledContent(L("Bundled engine", "内置引擎")) {
+                Text(fixed.bundledRuntimeVersion).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L("Portless", "Portless"))
+        }
+        .disabled(fixed.isWorking)
     }
 
     /// A section title that carries its explanation as a hover tooltip instead of standing
