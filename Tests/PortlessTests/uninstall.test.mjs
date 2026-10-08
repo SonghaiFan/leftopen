@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { validateService, validateTree, removingHosts, removeCertificate, checkAncestors,
+import { validateService, validateTree, removingHosts, removeCertificate, checkAncestors, certificateCleanup,
   label, runtime } from '../../Resources/Portless/uninstall-policy.mjs';
 
 const home = '/Users/fixture';
-const service = () => ({Label: label, ProgramArguments: [`${runtime}/node-arm64`, `${runtime}/package/dist/cli.js`],
+const service = () => ({Label: label, ProgramArguments: [`${runtime}/node-arm64`, `${runtime}/package/dist/cli.js`,
+  'proxy', 'start', '--foreground', '--port', '443', '--https', '--skip-trust'],
   EnvironmentVariables: {PORTLESS_STATE_DIR: `${home}/Library/Application Support/LeftOpen/Portless`}});
 
 test('service removal requires the exact runtime, label and original user state directory', () => {
@@ -19,6 +20,14 @@ test('service removal requires the exact runtime, label and original user state 
     {...service(), ProgramArguments: [`${runtime}/node-arm64`, '/tmp/project.js']}]) {
     assert.throws(() => validateService(value, home), /differentOwner/);
   }
+});
+
+test('missing original certificate permits service cleanup but never keychain deletion', () => {
+  assert.deepEqual(certificateCleanup(false, '-', true), {removeTrust: false, unresolved: true});
+  assert.deepEqual(certificateCleanup(false, '-', false), {removeTrust: false, unresolved: false});
+  assert.deepEqual(certificateCleanup(true, 'A'.repeat(64), true), {removeTrust: true, unresolved: false});
+  assert.throws(() => certificateCleanup(false, 'A'.repeat(64), true), /certificateChanged/);
+  assert.throws(() => certificateCleanup(true, '-', true), /certificateChanged/);
 });
 
 test('remove only LeftOpen hosts entries, preserving unrelated Portless and user mappings', () => {

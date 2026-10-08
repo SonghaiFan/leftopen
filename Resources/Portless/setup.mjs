@@ -4,6 +4,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { noLinks, repairUserDirectories, installAddressService } from './setup-policy.mjs';
+import { ownedService, assertOwnedHTTPSListener, stopOwnedService } from './service-identity.mjs';
 const label = 'app.leftopen.portless.proxy';
 const protectedRoot = '/Library/Application Support/LeftOpen/Portless';
 const plist = `/Library/LaunchDaemons/${label}.plist`;
@@ -23,39 +24,42 @@ for (const file of [home, path.join(home, 'Library'), path.join(home, 'Library/A
 }
 try { noLinks(directory); noLinks(protectedRoot); }
 catch { fail('unsafePath'); }
-if (fs.existsSync(plist) && !fs.readFileSync(plist, 'utf8').includes(directory)) fail('differentOwner');
 const nodeName = process.arch === 'arm64' ? 'node-arm64' : 'node-x64';
 const protectedNode = path.join(protectedRoot, nodeName);
 const protectedParent = path.dirname(protectedRoot);
 if (fs.existsSync(protectedParent) && fs.statSync(protectedParent).uid !== 0) fail('unsafeRuntime');
 if (fs.existsSync(protectedRoot) && (fs.lstatSync(protectedRoot).isSymbolicLink() || fs.statSync(protectedRoot).uid !== 0)) fail('unsafeRuntime');
 // Refuse to replace an unrelated listener, including external Portless.
-let portBusy = false;
-const probe = net.createServer();
-await new Promise(resolve => {
-  probe.once('error', () => { portBusy = true; resolve(); });
-  probe.listen(443, '127.0.0.1', () => probe.close(resolve));
-});
-if (portBusy) {
-  let owned = false;
-  try {
-    const pid = Number(fs.readFileSync(path.join(directory, 'proxy.pid'), 'utf8').trim());
-    const check = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });
-    owned = check.status === 0 && check.stdout.trim() === protectedNode && fs.existsSync(plist);
-  } catch {}
-  if (!owned) fail('portBusy');
+function run(command, args) {
+  return spawnSync(command, args, {encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,
+    env: {PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL: 'C'}});
 }
-// A forged or stale PID file must never make an elevated Portless stop signal another process.
+async function busy() {
+  const probe = net.createServer();
+  return new Promise((resolve, reject) => {
+    probe.once('error', error => error.code === 'EADDRINUSE' ? resolve(true) : reject(new Error('portCheckFailed')));
+    probe.listen(443, '127.0.0.1', () => probe.close(() => resolve(false)));
+  });
+}
+let service;
 try {
-  const pidFile = path.join(directory, 'proxy.pid');
-  const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
-  const check = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });
-  if (check.status !== 0) fs.unlinkSync(pidFile);
-  else if (check.stdout.trim() !== protectedNode) fail('differentOwner');
-} catch (error) { if (error.code !== 'ENOENT') fail('setupFailed'); }
+  service = ownedService(home, run);
+  if (await busy()) assertOwnedHTTPSListener(service, run);
+} catch (error) { fail(error.message); }
 try { repairUserDirectories(home, uid, gid); }
 catch (error) { fail(['unsafePath', 'differentOwner', 'invalidOwner'].includes(error.message)
   ? error.message : 'userDirectoryRepairFailed'); }
+try {
+  await stopOwnedService(home, service, run);
+  // A verified service may need a moment to release its socket after bootout.
+  for (let attempt = 0; await busy(); attempt++) {
+    if (attempt >= 20) throw new Error('portBusy');
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  // Never let upstream act on a stale or forged PID: the owned job was stopped above.
+  const pidFile = path.join(directory, 'proxy.pid');
+  if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+} catch (error) { fail(error.message); }
 fs.mkdirSync(protectedRoot, { recursive: true, mode: 0o755 });
 // Copy only the verified package and helpers, never a project script or shell profile.
 for (const name of ['package', nodeName, 'lease-gate.mjs', 'PORTLESS-LICENSE', `NODE-LICENSE-${process.arch === 'arm64' ? 'arm64' : 'x64'}`, 'LEFTOPEN-NOTICE']) {

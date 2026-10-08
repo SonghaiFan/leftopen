@@ -71,6 +71,7 @@ public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
 
     private enum Keys {
+        static let ignoredPorts = "leftopen.ignoredPorts"
         static let refreshInterval = "leftopen.refreshInterval"
         static let menuBarBadgeMode = "leftopen.menuBarBadgeMode"
         static let language = "leftopen.language"
@@ -81,7 +82,7 @@ public final class AppSettings: ObservableObject {
         static let soundVolume = "leftopen.soundVolume"
     }
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     @Published public var refreshInterval: RefreshInterval {
         didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) }
@@ -117,7 +118,37 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(language.rawValue, forKey: Keys.language) }
     }
 
-    private init() {
+    @Published public private(set) var ignoredPorts: [Int] {
+        didSet { defaults.set(ignoredPorts, forKey: Keys.ignoredPorts) }
+    }
+
+    public func addIgnoredPort(_ port: Int) {
+        guard (1...65535).contains(port), !ignoredPorts.contains(port) else { return }
+        ignoredPorts = (ignoredPorts + [port]).sorted()
+    }
+
+    /// Parse the entire edit before saving so an invalid entry never drops existing ports.
+    @discardableResult
+    public func setIgnoredPorts(from text: String) -> Bool {
+        let tokens = text.split { $0 == "," || $0 == "，" || $0.isWhitespace }
+        var ports = Set<Int>()
+        for token in tokens {
+            guard token.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let port = Int(token), (1...65535).contains(port) else { return false }
+            ports.insert(port)
+        }
+        ignoredPorts = ports.sorted()
+        return true
+    }
+
+    public func removeIgnoredPort(_ port: Int) {
+        ignoredPorts.removeAll { $0 == port }
+    }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        ignoredPorts = Array(Set(defaults.array(forKey: Keys.ignoredPorts) as? [Int] ?? []))
+            .filter { (1...65535).contains($0) }.sorted()
         let storedInterval = defaults.object(forKey: Keys.refreshInterval) as? Int ?? RefreshInterval.minute1.rawValue
         self.refreshInterval = RefreshInterval(rawValue: storedInterval) ?? .minute1
 

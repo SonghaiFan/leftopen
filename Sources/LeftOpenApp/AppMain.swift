@@ -90,10 +90,11 @@ final class MenuModel: ObservableObject {
 
     /// Hide a closing row optimistically until the follow-up scan confirms the result.
     var visible: ScanSnapshot {
-        guard !closingActivityIDs.isEmpty else { return snapshot }
+        let ignored = Set(AppSettings.shared.ignoredPorts)
+        guard !closingActivityIDs.isEmpty || !ignored.isEmpty else { return snapshot }
         return ScanSnapshot(
             activities: snapshot.activities.filter {
-                !closingActivityIDs.contains($0.id)
+                !closingActivityIDs.contains($0.id) && !ignored.contains($0.listener.port)
             },
             limitations: snapshot.limitations
         )
@@ -202,11 +203,12 @@ final class MenuModel: ObservableObject {
                         notice = nil
                     }
                 }
+                let ignored = Set(AppSettings.shared.ignoredPorts)
                 let listeningPorts = Set(snapshot.activities.map(\.listener.port))
                 if let previousListeningPorts {
-                    if !listeningPorts.subtracting(previousListeningPorts).isEmpty {
+                    if !listeningPorts.subtracting(previousListeningPorts).subtracting(ignored).isEmpty {
                         DoorSound.doorOpen.play()
-                    } else if !previousListeningPorts.subtracting(listeningPorts).isEmpty {
+                    } else if !previousListeningPorts.subtracting(listeningPorts).subtracting(ignored).isEmpty {
                         DoorSound.doorClose.play()
                     }
                 }

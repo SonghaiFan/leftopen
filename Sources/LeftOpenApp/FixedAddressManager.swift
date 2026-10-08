@@ -141,6 +141,7 @@ final class FixedAddressManager: ObservableObject {
     @Published private(set) var recovering = false
     @Published private(set) var addressSetupState: AddressSetupState = .checking
     @Published private(set) var setupError: String?
+    @Published private(set) var setupDiagnostic: FailureDiagnostics?
     var addressesReady: Bool { addressSetupState == .ready }
     private var selectedServices: [String: Activity] = [:]
     private var consecutiveFailures = 0
@@ -210,6 +211,7 @@ final class FixedAddressManager: ObservableObject {
         guard !isWorking, !uninstalling else { return }
         isWorking = true
         setupError = nil
+        setupDiagnostic = nil
         defer { isWorking = false; startMonitor() }
         do {
             try await service.prepare()
@@ -223,6 +225,8 @@ final class FixedAddressManager: ObservableObject {
         } catch {
             addressSetupState = usesHTTPS ? .needsRepair : .needsSetup
             setupError = error.localizedDescription
+            setupDiagnostic = (error as? PortlessServiceError)?.diagnostic
+                ?? FailureDiagnostics(stage: "address.setup", code: "failed", error: error as NSError)
         }
     }
 

@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { checkAncestors, validateTree, validateService, removingHosts, removeCertificate,
-  label, runtime, plist } from './uninstall-policy.mjs';
+import { checkAncestors, validateTree, removingHosts, removeCertificate, certificateCleanup,
+  runtime, plist } from './uninstall-policy.mjs';
+import { ownedService, stopOwnedService } from './service-identity.mjs';
 
 function run(command, args) {
   return spawnSync(command, args, { encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,
-    env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' } });
+    env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL: 'C' } });
 }
 function checked(command, args, code) {
   const result = run(command, args);
@@ -33,27 +34,18 @@ try {
     if (info.uid !== 0 || (info.mode & 0o022) !== 0) throw new Error('unsafePath');
   }
   validateTree(support, [0, uid]); validateTree(runtime, [0]); validateTree(plist, [0]);
-  if (exists(plist)) {
-    const info = JSON.parse(checked('/usr/bin/plutil', ['-convert', 'json', '-o', '-', plist], 'unsafeService'));
-    validateService(info, home);
-  }
+  const service = ownedService(home, run);
+  const certificatePlan = certificateCleanup(exists(certificate), fingerprint,
+    exists(plist) || exists(runtime) || exists(support));
   if (exists(certificate)) {
     const actual = new crypto.X509Certificate(fs.readFileSync(certificate)).fingerprint256.replaceAll(':', '');
     if (actual !== fingerprint) throw new Error('certificateChanged');
-  } else if (fingerprint !== '-' || exists(plist) || exists(runtime)) {
-    // Without the original certificate we cannot identify its keychain entry safely.
-    throw new Error('certificateUnavailable');
   }
   // Validate hosts before any destructive operation. Check again after service shutdown.
   checkAncestors('/private/etc/hosts');
   removingHosts(fs.readFileSync('/private/etc/hosts', 'utf8'));
-  const loaded = run('/bin/launchctl', ['print', `system/${label}`]);
-  if (loaded.status === 0) {
-    if (!exists(plist)) throw new Error('unsafeService');
-    checked('/bin/launchctl', ['bootout', `system/${label}`], 'serviceStopFailed');
-    if (run('/bin/launchctl', ['print', `system/${label}`]).status === 0) throw new Error('serviceStopFailed');
-  } else if (!loaded.stderr?.includes('Could not find service')) throw new Error('serviceCheckFailed');
-  if (fingerprint !== '-') {
+  await stopOwnedService(home, service, run);
+  if (certificatePlan.removeTrust) {
     const trust = run('/usr/bin/security', ['remove-trusted-cert', '-d', certificate]);
     if (trust.status !== 0 && !trust.stderr?.includes('specified item could not be found')) throw new Error('certificateRemovalFailed');
     removeCertificate(fingerprint, '/Library/Keychains/System.keychain', run);
@@ -68,7 +60,7 @@ try {
       fs.renameSync(temporary, hosts);
     } finally { if (exists(temporary)) fs.unlinkSync(temporary); }
   }
-  // All certificate operations succeeded before state (including private keys) is deleted.
+  // Identified certificates were removed. If identity is lost, leave keychains untouched and warn.
   for (const target of [plist, runtime, support]) {
     if (!exists(target)) continue;
     checkAncestors(target); validateTree(target, target === support ? [0, uid] : [0]);
@@ -76,11 +68,12 @@ try {
   }
   const parent = path.dirname(runtime);
   if (exists(parent) && fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
-  process.stdout.write('removed\n');
+  process.stdout.write(certificatePlan.unresolved ? 'removed:certificateUnresolved\n' : 'removed\n');
 } catch (error) {
   const codes = new Set(['authorizationRequired', 'invalidOwner', 'unsafePath', 'differentOwner', 'unsafeService',
     'certificateChanged', 'certificateUnavailable', 'unsafeHosts', 'serviceStopFailed', 'serviceCheckFailed',
-    'certificateRemovalFailed', 'keychainUnavailable', 'hostsChanged']);
+    'certificateRemovalFailed', 'keychainUnavailable', 'hostsChanged', 'serviceChanged',
+    'serviceStopPending', 'stopVerificationFailed']);
   process.stderr.write((codes.has(error.message) ? error.message : 'cleanupFailed') + '\n');
   process.exitCode = 1;
 }

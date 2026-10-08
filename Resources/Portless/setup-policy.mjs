@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { commandDiagnostic } from './diagnostics.mjs';
 
 function statIfPresent(file, io) {
   try { return io.lstatSync(file); }
@@ -52,6 +53,7 @@ export function repairUserDirectories(home, uid, gid, io = fs) {
 // Only machine-readable stage/status is exposed; never forward child stderr, paths or env.
 export function checkedSetupResult(result, stage) {
   if (result.status === 0 && !result.error && !result.signal) return;
+  commandDiagnostic(stage === 'launchdEnableFailed' ? 'launchd.enable' : 'service.install', result);
   const detail = result.error?.code === 'ETIMEDOUT' ? 'timeout'
     : Number.isInteger(result.status) ? `exit_${result.status}` : 'failed';
   throw new Error(`${stage}:${detail}`);

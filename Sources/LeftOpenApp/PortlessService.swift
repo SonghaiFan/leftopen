@@ -14,6 +14,7 @@ struct PortlessProjectInfo: Decodable, Sendable {
 
 struct PortlessServiceError: LocalizedError {
     let message: String
+    var diagnostic: FailureDiagnostics? = nil
     var errorDescription: String? { message }
 }
 
@@ -59,7 +60,9 @@ actor PortlessService {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
         guard task.terminationStatus == 0, data.count <= 1024 * 1024 else {
-            throw PortlessServiceError(message: L("The project address could not be prepared. Try again.", "暂时无法准备项目地址，请重试。"))
+            throw PortlessServiceError(message: L("The project address could not be prepared. Try again.", "暂时无法准备项目地址，请重试。"),
+                diagnostic: FailureDiagnostics(stage: "address.command", code: data.count > 1024 * 1024 ? "outputTooLarge" : "commandFailed",
+                    tool: "node", exitCode: task.terminationStatus, signal: task.terminationReason == .uncaughtSignal))
         }
         return data
     }
@@ -166,7 +169,8 @@ actor PortlessService {
             guard lookup.terminationStatus == 0,
                   let keychain = CertificateAuthorization.keychainPath(from: keychainOutput) else {
                 throw PortlessServiceError(message: L("Your default user keychain is unavailable. Open Keychain Access, check your login keychain, then retry.",
-                    "无法访问默认用户钥匙串，请在“钥匙串访问”中检查登录钥匙串后重试。"))
+                    "无法访问默认用户钥匙串，请在“钥匙串访问”中检查登录钥匙串后重试。"),
+                    diagnostic: FailureDiagnostics(stage: "keychain.default", code: "keychainUnavailable", tool: "security", exitCode: lookup.terminationStatus))
             }
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -184,7 +188,8 @@ actor PortlessService {
             task.waitUntilExit()
             let failure: CertificateAuthorization.Failure = task.terminationReason == .uncaughtSignal && task.terminationStatus == SIGTERM
                 ? .timedOut : CertificateAuthorization.failure(diagnostic: diagnostic)
-            return (task.terminationStatus, failure)
+            return (task.terminationStatus, failure, FailureDiagnostics(stage: "certificate.trust", code: String(describing: failure),
+                tool: "security", exitCode: task.terminationStatus, signal: task.terminationReason == .uncaughtSignal, output: diagnostic))
         }.value
         guard result.0 == 0 else {
             let message: String
@@ -202,11 +207,12 @@ actor PortlessService {
                 message = L("macOS could not trust the local certificate (authorization exit \(result.0)). Retry local address setup.",
                             "macOS 未能信任本地证书（授权退出码 \(result.0)），请重试本地地址设置。")
             }
-            throw PortlessServiceError(message: message)
+            throw PortlessServiceError(message: message, diagnostic: result.2)
         }
         guard certificateTrusted() else {
             throw PortlessServiceError(message: L("macOS has not trusted the local certificate yet. Retry and complete the certificate authorization.",
-                                                  "macOS 尚未信任本地证书，请重试并完成证书授权。"))
+                                                  "macOS 尚未信任本地证书，请重试并完成证书授权。"),
+                diagnostic: FailureDiagnostics(stage: "certificate.verifyTrust", code: "notTrusted"))
         }
     }
 
@@ -241,7 +247,8 @@ actor PortlessService {
             let diagnostic = String(decoding: failure.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             task.waitUntilExit()
             let code = AddressSetupPolicy.installationFailure(diagnostic)
-            return (task.terminationStatus, code)
+            return (task.terminationStatus, code, FailureDiagnostics(stage: "address.install", code: code,
+                tool: "osascript", exitCode: task.terminationStatus, signal: task.terminationReason == .uncaughtSignal, output: diagnostic))
         }.value
         guard result.0 == 0 else {
             let message: String
@@ -249,6 +256,11 @@ actor PortlessService {
             case "cancelled": message = L("Setup was cancelled. Retry when ready.", "设置已取消，准备好后可重试。")
             case "portBusy": message = L("Another service is using the HTTPS address port. Close it before retrying.", "其他服务正在占用 HTTPS 地址端口，请关闭该服务后重试。")
             case "differentOwner": message = L("The address service belongs to another user. Your project is unchanged.", "地址服务属于其他用户，项目未作改动。")
+            case "unsafeService", "serviceCheckFailed", "serviceChanged": message = L("The existing address service could not be safely identified. No unrelated service was stopped. Retry setup.", "无法安全确认现有地址服务的归属，未停止其他服务。请重试设置。")
+            case "serviceStopFailed": message = L("LeftOpen's previous address service could not be stopped. Retry setup.", "未能停止 LeftOpen 的旧地址服务，请重试设置。")
+            case "serviceStopPending": message = L("The previous service has not finished stopping. Wait a moment, then retry.", "旧地址服务尚未完成停止，请稍候重试。")
+            case "stopVerificationFailed": message = L("Could not confirm whether the previous service stopped. Copy the diagnostic info for support.", "暂时无法确认旧服务是否已停止，可复制诊断信息反馈。")
+            case "portCheckFailed": message = L("The HTTPS port could not be checked. Retry setup.", "无法检查 HTTPS 端口，请重试设置。")
             case "unsafePath", "unsafeRuntime", "invalidOwner": message = L("The address service files could not be safely installed. Your project is unchanged.", "无法安全安装地址服务文件，项目未作改动。")
             case "userDirectoryRepairFailed": message = L("Could not repair access to the local address folder. Retry setup with administrator authorization.", "无法修复本地地址目录的访问权限，请重试并完成管理员授权。")
             case "launchdEnableFailed": message = L("macOS could not re-enable the address service (\(result.1)). Retry setup.", "macOS 未能重新启用地址服务（\(result.1)），请重试设置。")
@@ -256,7 +268,7 @@ actor PortlessService {
             case "setupTimedOut": message = L("Address setup timed out. Retry and complete the macOS authorization prompts.", "地址设置超时，请重试并完成 macOS 授权弹窗。")
             default: message = L("The background address service could not be installed. Retry to authorize setup.", "后台地址服务未能安装，请重试并完成系统授权。")
             }
-            throw PortlessServiceError(message: message)
+            throw PortlessServiceError(message: message, diagnostic: result.2)
         }
         try requireReadableCertificate(certificate)
         if !certificateTrusted() { try await trustForCurrentUser() }
@@ -264,19 +276,22 @@ actor PortlessService {
             if await available() { return }
             try await Task.sleep(for: .milliseconds(250))
         }
-        throw PortlessServiceError(message: L("HTTPS is not ready yet. Try again shortly.", "HTTPS 尚未就绪，请稍后重试。"))
+        throw PortlessServiceError(message: L("HTTPS is not ready yet. Try again shortly.", "HTTPS 尚未就绪，请稍后重试。"),
+            diagnostic: FailureDiagnostics(stage: "address.health", code: "notReady"))
     }
 
     private func requireReadableCertificate(_ certificate: URL) throws {
         let message: String
-        switch AddressSetupPolicy.certificateFile(at: certificate.path) {
+        let state = AddressSetupPolicy.certificateFile(at: certificate.path)
+        switch state {
         case .readable: return
         case .missing: message = L("The local certificate is missing after setup. Retry local address setup.", "设置后仍未找到本地证书，请重试本地地址设置。")
         case .inaccessible: message = L("The local certificate cannot be read because of folder or file permissions. Retry setup to repair access.", "本地证书因目录或文件权限无法读取，请重试设置以修复访问权限。")
         case .unsafe: message = L("The local certificate path is not a regular file. Setup was stopped for safety.", "本地证书路径不是普通文件，已停止设置。")
         case .unavailable: message = L("The local certificate could not be read. Retry local address setup.", "暂时无法读取本地证书，请重试本地地址设置。")
         }
-        throw PortlessServiceError(message: message)
+        throw PortlessServiceError(message: message,
+            diagnostic: FailureDiagnostics(stage: "certificate.read", code: String(describing: state)))
     }
 
     func replace(_ routes: [ServiceRoute]) throws {
