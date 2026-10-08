@@ -145,14 +145,46 @@ actor PortlessService {
     }
 
     private func trustForCurrentUser() async throws {
-        // Trust Settings authorization belongs to the logged-in GUI user. An elevated shell
-        // can import the certificate yet fail to grant trust; never treat that as readiness.
+        // Request GUI authorization explicitly. The upstream CLI can fall back to sudo,
+        // which cannot read a password from this app's closed stdin. Trust only the existing
+        // CA; invoking `trust` also regenerates certificates and can leave a running proxy stale.
+        let certificate = Self.directory.appendingPathComponent("ca.pem")
+        guard FileManager.default.fileExists(atPath: certificate.path) else {
+            throw PortlessServiceError(message: L("The local certificate is missing. Retry local address setup.",
+                                                  "本地证书缺失，请重试本地地址设置。"))
+        }
         await MainActor.run { NSApplication.shared.activate(ignoringOtherApps: true) }
-        do {
-            _ = try command([runtime.appendingPathComponent("package/dist/cli.js").path, "trust"])
-        } catch {
-            throw PortlessServiceError(message: L("The local certificate was not authorized. Approve the macOS certificate prompt, then retry. Your project is still running.",
-                                                  "本地证书尚未获授权，请完成 macOS 证书授权后重试。项目仍在运行。"))
+        let script = CertificateAuthorization.script(certificatePath: certificate.path,
+            prompt: L("Trust LeftOpen's local HTTPS certificate for project addresses.",
+                      "信任 LeftOpen 的本地 HTTPS 证书，以启用项目固定地址。"))
+        let result = try await Task.detached(priority: .utility) {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", script]
+            task.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+            task.standardInput = FileHandle.nullDevice
+            task.standardOutput = FileHandle.nullDevice
+            let errors = Pipe()
+            task.standardError = errors
+            try task.run()
+            let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            task.waitUntilExit()
+            return (task.terminationStatus, CertificateAuthorization.failure(diagnostic: diagnostic))
+        }.value
+        guard result.0 == 0 else {
+            let message: String
+            switch result.1 {
+            case .cancelled:
+                message = L("Certificate authorization was cancelled. Retry when ready. Your project is still running.",
+                            "证书授权已取消，准备好后可重试。项目仍在运行。")
+            case .timedOut:
+                message = L("Certificate authorization timed out. Retry and complete the macOS prompt.",
+                            "证书授权超时，请重试并完成 macOS 授权弹窗。")
+            case .rejected:
+                message = L("macOS could not trust the local certificate (authorization exit \(result.0)). Retry local address setup.",
+                            "macOS 未能信任本地证书（授权退出码 \(result.0)），请重试本地地址设置。")
+            }
+            throw PortlessServiceError(message: message)
         }
         guard certificateTrusted() else {
             throw PortlessServiceError(message: L("macOS has not trusted the local certificate yet. Retry and complete the certificate authorization.",

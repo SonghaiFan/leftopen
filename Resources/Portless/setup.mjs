@@ -85,7 +85,7 @@ const env = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: home, SUDO_USER: user
 const cli = path.join(protectedRoot, 'package/dist/cli.js');
 run(protectedNode, cli, ['service', 'install', '--state-dir', directory, '--https', '--port', '443'], env);
 // Verify trust as the browser's user, rather than accepting a marker as proof.
-const trust = spawnSync('/usr/bin/sudo', ['-u', user, '/usr/bin/security', 'verify-cert', '-c', path.join(directory, 'ca.pem'), '-L', '-p', 'basic'],
+const trust = spawnSync('/usr/bin/sudo', ['-u', user, '/usr/bin/security', 'verify-cert', '-c', path.join(directory, 'ca.pem'), '-L', '-p', 'ssl'],
   { env, encoding: 'utf8', timeout: 30000 });
 // The native app completes trust in the GUI user's authorization session when needed.
 // Service installation and certificate trust are separate readiness checks.
