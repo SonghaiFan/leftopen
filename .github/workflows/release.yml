@@ -94,6 +94,8 @@ jobs:
       - name: Test
         run: |
           python3 -m unittest discover -s Tests/ReleaseTests
+          ruby Tests/HomebrewTests/uninstall_test.rb
+          brew ruby Tests/HomebrewTests/integration.rb
           swift test
 
       - name: Build Universal app and CLI
@@ -193,6 +195,14 @@ jobs:
           ref: main
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
+      - name: Read cask template from the released source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: .leftopen-release-source
+          persist-credentials: false
+
       - name: Update cask
         run: |
           python3 - <<'PY'
@@ -209,6 +219,7 @@ jobs:
               raise SystemExit('Refusing to downgrade a newer Homebrew release')
           if not re.fullmatch(r'[0-9a-f]{64}', os.environ['SHA256']):
               raise SystemExit('Missing or invalid release checksum')
+          source = Path('.leftopen-release-source/Resources/Homebrew/leftopen.rb').read_text()
           for name, value in [('version', os.environ['VERSION']), ('sha256', os.environ['SHA256'])]:
               source, count = re.subn(rf'(?m)^(  {name} )"[^"]+"$', lambda m: f'{m[1]}"{value}"', source)
               if count != 1:
