@@ -34,7 +34,9 @@ public enum AddressSetupPolicy {
     public static func installationFailure(_ diagnostic: String) -> String {
         if diagnostic.contains("(-128)") { return "cancelled" }
         let stages = ["portBusy", "differentOwner", "unsafePath", "unsafeRuntime", "invalidOwner",
-                      "userDirectoryRepairFailed", "launchdEnableFailed", "serviceInstallFailed"]
+                      "userDirectoryRepairFailed", "launchdEnableFailed", "serviceInstallFailed",
+                      "unsafeService", "serviceCheckFailed", "serviceChanged", "serviceStopFailed", "portCheckFailed",
+                      "serviceStopPending", "stopVerificationFailed"]
         for stage in stages where diagnostic.contains(stage) {
             // Accept only an allowlisted code and bounded numeric exit status; no raw diagnostics.
             if let range = diagnostic.range(of: stage + #":(?:timeout|failed|exit_[0-9]{1,3})(?![0-9])"#,

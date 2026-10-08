@@ -32,6 +32,7 @@ struct SettingsView: View {
             case .general:
                 generalSettings
                 monitoringSettings
+                allowlistSettings
             case .projects:
                 addressSettings
             case .behavior:
@@ -72,6 +73,7 @@ struct SettingsView: View {
             }
             if let error = uninstall.error {
                 Text(error).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                if let report = uninstall.diagnostic { ErrorDiagnosticsView(report: report) }
             }
         }
     }
@@ -101,6 +103,22 @@ struct SettingsView: View {
         } header: {
             sectionHeader(L("Port Monitoring", "端口监控"),
                 help: L("How often LeftOpen scans and what the menu bar shows.", "设置 LeftOpen 的扫描频率和菜单栏显示内容。"))
+        }
+    }
+
+    private var allowlistSettings: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("Hide these ports from the list, search, menu bar count, and change sounds. Services keep running.",
+                       "这些端口不显示在列表、搜索和菜单栏计数中，也不触发变化提示音。服务仍继续运行。"))
+                    .font(AppAppearance.secondary)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                PortAllowlistInput()
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text(L("Port Allowlist", "端口白名单"))
         }
     }
 
@@ -216,6 +234,7 @@ struct SettingsView: View {
             if let error = fixed.setupError {
                 Text(error).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                if let report = fixed.setupDiagnostic { ErrorDiagnosticsView(report: report) }
             }
         } header: {
             sectionHeader(L("Project Addresses", "项目地址"),

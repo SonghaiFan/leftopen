@@ -2,18 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { noLinks } from './setup-policy.mjs';
 
-export const label = 'app.leftopen.portless.proxy';
-export const runtime = '/Library/Application Support/LeftOpen/Portless';
-export const plist = `/Library/LaunchDaemons/${label}.plist`;
+export { label, runtime, plist, validateService } from './service-identity.mjs';
 
-export function validateService(value, home) {
-  const args = value.ProgramArguments;
-  if (value.Label !== label || !Array.isArray(args) ||
-      ![`${runtime}/node-arm64`, `${runtime}/node-x64`].includes(args[0]) ||
-      args[1] !== `${runtime}/package/dist/cli.js` ||
-      value.EnvironmentVariables?.PORTLESS_STATE_DIR !== `${home}/Library/Application Support/LeftOpen/Portless`) {
-    throw new Error('differentOwner');
+export function certificateCleanup(certificateExists, fingerprint, hasInstallation) {
+  if (!certificateExists) {
+    // Disappeared after the user-session probe: do not erase evidence of a race.
+    if (fingerprint !== '-') throw new Error('certificateChanged');
+    return {removeTrust: false, unresolved: hasInstallation};
   }
+  if (!/^[A-F0-9]{64}$/.test(fingerprint)) throw new Error('certificateChanged');
+  return {removeTrust: true, unresolved: false};
 }
 
 export function validateTree(target, owners, io = fs) {

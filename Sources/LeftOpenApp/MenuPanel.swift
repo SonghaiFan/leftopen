@@ -88,10 +88,9 @@ struct MenuPanel: View {
 
     private var filteredActivities: [Activity] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Search the full scan while omitting rows that are closing optimistically.
+        // Use the same visible ports for search, list and counts.
         guard !search.isEmpty else { return model.visible.activities }
-        return model.snapshot.activities.filter { activity in
-            guard !model.closingActivityIDs.contains(activity.id) else { return false }
+        return model.visible.activities.filter { activity in
             let fields = [
                 String(activity.listener.port), String(activity.process.pid),
                 activity.inference.label, activity.process.command,
@@ -757,6 +756,7 @@ struct MenuPanel: View {
     private var emptyView: some View {
         let scanUnavailable = model.notice?.kind == .error && model.snapshot.activities.isEmpty
         let nothingListening = model.visible.activities.isEmpty && query.isEmpty
+        let hasHiddenPorts = model.snapshot.activities.contains { settings.ignoredPorts.contains($0.listener.port) }
         return VStack(spacing: 6) {
             Image(systemName: scanUnavailable ? "exclamationmark.triangle"
                 : nothingListening ? "door.left.hand.closed" : "magnifyingglass")
@@ -766,7 +766,7 @@ struct MenuPanel: View {
             Text(scanUnavailable ? L("Unable to scan", "无法扫描") : nothingListening ? L("Nothing left open", "没有虚掩的门") : L("No matching ports", "没有匹配的端口"))
                 .font(.headline)
             Text(scanUnavailable ? L("Check the message above, then refresh.", "请查看上方提示，然后刷新。")
-                : nothingListening ? L("No TCP listeners on this Mac.", "这台 Mac 上没有 TCP 监听。") : L("Try a port number, process name, or PID.", "试试端口号、进程名或 PID。"))
+                : nothingListening ? (hasHiddenPorts ? L("Allowlisted ports are hidden. Manage them in Settings.", "白名单中的端口已隐藏，可在设置中管理。") : L("No TCP listeners on this Mac.", "这台 Mac 上没有 TCP 监听。")) : L("Try a port number, process name, or PID.", "试试端口号、进程名或 PID。"))
                 .font(AppAppearance.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1105,6 +1105,15 @@ struct MenuPanel: View {
         }
         Button(ports.count == 1 ? L("Copy Port", "复制端口") : L("Copy Ports", "复制端口")) {
             copy(ports.map(String.init).joined(separator: ", "))
+        }
+        if ports.count == 1, let port = ports.first {
+            Button(L("Add to Port Allowlist", "加入端口白名单")) { settings.addIgnoredPort(port) }
+        } else {
+            Menu(L("Add to Port Allowlist", "加入端口白名单")) {
+                ForEach(ports, id: \.self) { port in
+                    Button(String(port)) { settings.addIgnoredPort(port) }
+                }
+            }
         }
         Button(L("Copy PID", "复制 PID")) { copy(String(primary.process.pid)) }
         if let folder = revealTarget(for: primary) {

@@ -38,6 +38,9 @@ final class AddressSetupPolicyTests: XCTestCase {
         XCTAssertEqual(AddressSetupPolicy.installationFailure("serviceInstallFailed:exit_5 /private/name token=secret"), "serviceInstallFailed:exit_5")
         XCTAssertEqual(AddressSetupPolicy.installationFailure("launchdEnableFailed:timeout"), "launchdEnableFailed:timeout")
         XCTAssertEqual(AddressSetupPolicy.installationFailure("userDirectoryRepairFailed"), "userDirectoryRepairFailed")
+        for stage in ["unsafeService", "serviceChanged", "serviceStopFailed", "serviceCheckFailed", "portCheckFailed", "serviceStopPending", "stopVerificationFailed"] {
+            XCTAssertEqual(AddressSetupPolicy.installationFailure(stage + " private path"), stage)
+        }
         XCTAssertEqual(AddressSetupPolicy.installationFailure("arbitrary private data"), "failed")
         XCTAssertEqual(AddressSetupPolicy.installationFailure("User canceled (-128)"), "cancelled")
     }

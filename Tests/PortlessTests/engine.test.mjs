@@ -46,6 +46,27 @@ async function request(port, host = 'test.localhost') {
   });
 }
 
+// Reserve a preferred proxy port without taking over an existing user service.
+async function blockedEngineState(t) {
+  for (let port = 1355; port <= 1365; port++) {
+    const blocker = net.createServer();
+    try {
+      blocker.listen(port, '127.0.0.1'); await once(blocker, 'listening');
+    } catch (error) {
+      if (error.code === 'EADDRINUSE') continue;
+      throw error;
+    }
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'leftopen-engine-test-'));
+    fs.writeFileSync(path.join(directory, 'port.json'), JSON.stringify(port));
+    t.after(() => {
+      if (blocker.listening) blocker.close();
+      fs.rmSync(directory, {recursive: true, force: true});
+    });
+    return {blocker, port, directory};
+  }
+  throw new Error('No free proxy test port; existing listeners were left untouched');
+}
+
 test('hosts setup preserves other entries, is idempotent, and refuses conflicting DNS', () => {
   const original = '127.0.0.1 localhost\n# portless managed\n127.0.0.1 external.localhost\n';
   const updated = addingHosts(original, ['my--app.localhost']);
@@ -94,10 +115,9 @@ test('IPv6-only upstream and dead route owners', async t => {
 });
 
 test('occupied proxy port is preserved, and parent death stops the proxy', async t => {
-  const blocker = net.createServer(); blocker.listen(1355, '127.0.0.1'); await once(blocker, 'listening');
-  t.after(() => blocker.close());
-  const instance = await engine(t, 2147483647);
-  assert.notEqual(instance.port, 1355);
+  const {blocker, port, directory} = await blockedEngineState(t);
+  const instance = await engine(t, 2147483647, directory);
+  assert.notEqual(instance.port, port);
   const exited = once(instance.child, 'exit'); await exited;
   assert.equal(instance.child.exitCode, 0);
   assert.equal(blocker.listening, true);
@@ -114,10 +134,9 @@ test('route lease expires if the app stops refreshing', async t => {
 });
 
 test('selected proxy port survives a restart after a temporary conflict clears', async t => {
-  const blocker = net.createServer(); blocker.listen(1355, '127.0.0.1'); await once(blocker, 'listening');
-  t.after(() => blocker.close());
-  const first = await engine(t);
-  assert.notEqual(first.port, 1355);
+  const {blocker, port, directory} = await blockedEngineState(t);
+  const first = await engine(t, process.pid, directory);
+  assert.notEqual(first.port, port);
   const firstExit = once(first.child, 'exit'); first.child.stdin.end(); await firstExit;
   await new Promise(resolve => blocker.close(resolve));
   const second = await engine(t, process.pid, first.directory);
