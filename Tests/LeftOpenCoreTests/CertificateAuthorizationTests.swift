@@ -2,33 +2,36 @@ import XCTest
 @testable import LeftOpenCore
 
 final class CertificateAuthorizationTests: XCTestCase {
-    func testAuthorizationUsesSystemGUIAndExistingCertificate() {
-        let script = CertificateAuthorization.script(certificatePath: "/tmp/ca.pem", prompt: "Trust certificate")
-        XCTAssertTrue(script.contains("'/usr/bin/security' 'add-trusted-cert' '-d' '-r' 'trustRoot'"))
-        XCTAssertTrue(script.contains("'/Library/Keychains/System.keychain' '/tmp/ca.pem'"))
-        XCTAssertTrue(script.contains("with administrator privileges"))
-        XCTAssertTrue(script.contains("with timeout of 180 seconds"))
-        XCTAssertFalse(script.contains("sudo"))
+    func testTrustUsesUserDomainAndOnlySSL() {
+        let args = CertificateAuthorization.arguments(certificatePath: "/tmp/ca.pem", keychainPath: "/user/login.keychain-db")
+        XCTAssertEqual(args, ["add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", "/user/login.keychain-db", "/tmp/ca.pem"])
+        XCTAssertFalse(args.contains("-d"))
+        XCTAssertFalse(args.contains("/Library/Keychains/System.keychain"))
     }
 
     func testCancellationAndTimeoutAreNotGenericTrustFailures() {
         XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "User canceled. (-128)"), .cancelled)
         XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "AppleEvent timed out. (-1712)"), .timedOut)
         XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "Authorization denied. (1)"), .rejected)
+        XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "error -60006"), .cancelled)
+        XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "The user canceled this operation."), .cancelled)
+        XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "SecTrustSettingsSetTrustSettings: The authorization was denied since no user interaction was possible. (-60007)"), .interactionNotAllowed)
+        XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "User interaction is not allowed."), .interactionNotAllowed)
+        XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "SecTrustSettingsSetTrustSettings: The authorization was denied since no user interaction was possible."), .interactionNotAllowed)
+        XCTAssertEqual(CertificateAuthorization.failure(diagnostic: "error -25308"), .interactionNotAllowed)
     }
 
-    func testCertificatePathIsASingleShellArgument() throws {
+    func testCertificatePathIsPassedLiterallyWithoutAShell() {
         let path = "/tmp/O'Brien \"quoted\" $(touch sentinel) `id` \\ ca.pem"
-        let script = CertificateAuthorization.script(certificatePath: path, prompt: "Trust \"CA\"")
-        // Compile, but never execute the privileged AppleScript.
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".scpt")
-        defer { try? FileManager.default.removeItem(at: output) }
-        let compiler = Process()
-        compiler.executableURL = URL(fileURLWithPath: "/usr/bin/osacompile")
-        compiler.arguments = ["-o", output.path, "-e", script]
-        try compiler.run()
-        compiler.waitUntilExit()
-        XCTAssertEqual(compiler.terminationStatus, 0)
-        XCTAssertTrue(script.contains("O'\\\\''Brien"))
+        let args = CertificateAuthorization.arguments(certificatePath: path, keychainPath: "/user/custom keychain.keychain-db")
+        XCTAssertEqual(args.last, path)
+        XCTAssertEqual(args[6], "/user/custom keychain.keychain-db")
+    }
+
+    func testDefaultKeychainOutputRequiresOneAbsoluteQuotedPath() {
+        XCTAssertEqual(CertificateAuthorization.keychainPath(from: "    \"/user/custom keychain.keychain-db\"\n"), "/user/custom keychain.keychain-db")
+        for output in ["", "permission denied", "\"relative\"", "\"/one\"\n\"/two\""] {
+            XCTAssertNil(CertificateAuthorization.keychainPath(from: output))
+        }
     }
 }

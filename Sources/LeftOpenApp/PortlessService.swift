@@ -145,28 +145,44 @@ actor PortlessService {
     }
 
     private func trustForCurrentUser() async throws {
-        // Request GUI authorization explicitly. The upstream CLI can fall back to sudo,
-        // which cannot read a password from this app's closed stdin. Trust only the existing
-        // CA; invoking `trust` also regenerates certificates and can leave a running proxy stale.
+        // Trust this existing CA in the interactive user's domain. Elevated AppleScript
+        // can fail in trustd when its admin session cannot display authorization UI.
         let certificate = Self.directory.appendingPathComponent("ca.pem")
         try requireReadableCertificate(certificate)
         await MainActor.run { NSApplication.shared.activate(ignoringOtherApps: true) }
-        let script = CertificateAuthorization.script(certificatePath: certificate.path,
-            prompt: L("Trust LeftOpen's local HTTPS certificate for project addresses.",
-                      "信任 LeftOpen 的本地 HTTPS 证书，以启用项目固定地址。"))
         let result = try await Task.detached(priority: .utility) {
+            let lookup = Process()
+            lookup.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            lookup.arguments = ["default-keychain", "-d", "user"]
+            lookup.standardInput = FileHandle.nullDevice
+            lookup.standardError = FileHandle.nullDevice
+            let output = Pipe()
+            lookup.standardOutput = output
+            try lookup.run()
+            let keychainOutput = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            lookup.waitUntilExit()
+            guard lookup.terminationStatus == 0,
+                  let keychain = CertificateAuthorization.keychainPath(from: keychainOutput) else {
+                throw PortlessServiceError(message: L("Your default user keychain is unavailable. Open Keychain Access, check your login keychain, then retry.",
+                    "无法访问默认用户钥匙串，请在“钥匙串访问”中检查登录钥匙串后重试。"))
+            }
             let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            task.arguments = ["-e", script]
-            task.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            task.arguments = CertificateAuthorization.arguments(certificatePath: certificate.path, keychainPath: keychain)
+            // Inherit the GUI user's environment and audit session; do not elevate.
             task.standardInput = FileHandle.nullDevice
             task.standardOutput = FileHandle.nullDevice
             let errors = Pipe()
             task.standardError = errors
             try task.run()
+            let timeout = DispatchWorkItem { if task.isRunning { task.terminate() } }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 120, execute: timeout)
+            defer { timeout.cancel() }
             let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             task.waitUntilExit()
-            return (task.terminationStatus, CertificateAuthorization.failure(diagnostic: diagnostic))
+            let failure: CertificateAuthorization.Failure = task.terminationReason == .uncaughtSignal && task.terminationStatus == SIGTERM
+                ? .timedOut : CertificateAuthorization.failure(diagnostic: diagnostic)
+            return (task.terminationStatus, failure)
         }.value
         guard result.0 == 0 else {
             let message: String
@@ -177,6 +193,9 @@ actor PortlessService {
             case .timedOut:
                 message = L("Certificate authorization timed out. Retry and complete the macOS prompt.",
                             "证书授权超时，请重试并完成 macOS 授权弹窗。")
+            case .interactionNotAllowed:
+                message = L("macOS could not display certificate authorization in this session. Open LeftOpen in your logged-in desktop session, then retry.",
+                            "macOS 无法在当前会话显示证书授权，请在已登录的桌面会话中打开 LeftOpen 后重试。")
             case .rejected:
                 message = L("macOS could not trust the local certificate (authorization exit \(result.0)). Retry local address setup.",
                             "macOS 未能信任本地证书（授权退出码 \(result.0)），请重试本地地址设置。")

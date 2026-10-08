@@ -4,6 +4,25 @@ Prepared against `2247666483acabbf000791937f1c8fb1645fa05b` (v0.5.2 source).
 The owner authorized a beta for testing. A stable release and replying to #9
 still require separate confirmation.
 
+## Beta 2: authorization session correction
+
+The running beta 1 was confirmed as 0.5.3 build 1008. Native authd logs at
+21:32 on October 8 showed `trustd` denying `com.apple.trust-settings.admin`
+with `-60007` (`errAuthorizationInteractionNotAllowed`). The state directories
+were accessible; the current CA failed SSL trust verification.
+
+Certificate trust now runs `/usr/bin/security` directly as the logged-in app user,
+using that user's default keychain and SSL-only trust. It no longer uses an
+elevated AppleScript or a terminal sudo fallback for certificate trust. The
+Settings action remains the only caller; service installation retains its
+separate administrator prompt. The user completes any native certificate prompt.
+No terminal trust command was executed to pre-authorize this developer machine.
+
+Beta 2 validation: 56 Swift tests passed, including argument boundaries, user-domain
+SSL policy, default keychain parsing, and the observed interaction-denied error.
+The full in-app authorization prompt still requires user testing; these tests
+do not modify keychain trust or claim that GUI authorization was verified.
+
 ## Changes
 
 - Repair only `~/Library/Application Support/LeftOpen` and its `Portless` child:
