@@ -26,6 +26,8 @@ actor PortlessService {
 
     init(runtime: URL, node: URL) { self.runtime = runtime; self.node = node }
 
+    func hasRunningProjects() -> Bool { jobs.values.contains { $0.isRunning } }
+
     private var environment: [String: String] {
         ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
          "HOME": NSHomeDirectory(), "PORTLESS_STATE_DIR": Self.directory.path,
