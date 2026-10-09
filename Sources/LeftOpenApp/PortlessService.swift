@@ -219,7 +219,7 @@ actor PortlessService {
         }
     }
 
-    func prepare(port: Int = PortlessConfiguration.savedPort()) async throws {
+    func prepare(port: Int = PortlessConfiguration.savedPort()) async throws -> Int {
         guard PortlessConfiguration.validPort(port) else {
             throw PortlessServiceError(message: L("Choose a valid HTTPS proxy port.", "请选择有效的 HTTPS 代理端口。"))
         }
@@ -227,21 +227,22 @@ actor PortlessService {
         var prepared = false
         proxyPort = port
         defer { if !prepared { proxyPort = previousPort } }
-        if await available() { prepared = true; return }
+        if await available() { prepared = true; return proxyPort }
         // Repair only the missing step. Repeated attempts must not reinstall a working daemon.
         let certificate = Self.directory.appendingPathComponent("ca.pem")
         if AddressSetupPolicy.nextAction(installed: installedForCurrentUser(),
             certificate: AddressSetupPolicy.certificateFile(at: certificate.path),
             trusted: certificateTrusted()) == .trustExisting {
             try await trustForCurrentUser()
-            if await available() { prepared = true; return }
+            if await available() { prepared = true; return proxyPort }
         }
         let source = runtime
         let executable = node
+        let automatic = !hasRunningProjects()
         let result = try await Task.detached(priority: .utility) {
             func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             let args = [executable.path, source.appendingPathComponent("setup.mjs").path, source.path,
-                        NSHomeDirectory(), NSUserName(), String(getuid()), String(getgid()), String(port)]
+                        NSHomeDirectory(), NSUserName(), String(getuid()), String(getgid()), String(port)] + (automatic ? ["auto"] : [])
             let command = args.map(quote).joined(separator: " ")
             let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let task = Process()
@@ -250,21 +251,23 @@ actor PortlessService {
             task.arguments = ["-e", "do shell script \"\(escaped)\" with administrator privileges with prompt \"" +
                 L("Enable local HTTPS addresses for LeftOpen. This installs a local certificate and address service; no projects are changed.",
                   "为 LeftOpen 启用本机 HTTPS 地址。将安装本地证书与地址服务，不修改项目。") + "\""]
-            task.standardOutput = FileHandle.nullDevice
+            let output = Pipe()
+            task.standardOutput = output
             let failure = Pipe()
             task.standardError = failure
             try task.run()
             let diagnostic = String(decoding: failure.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             task.waitUntilExit()
+            let response = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             let code = AddressSetupPolicy.installationFailure(diagnostic)
             return (task.terminationStatus, code, FailureDiagnostics(stage: "address.install", code: code,
-                tool: "osascript", exitCode: task.terminationStatus, signal: task.terminationReason == .uncaughtSignal, output: diagnostic))
+                tool: "osascript", exitCode: task.terminationStatus, signal: task.terminationReason == .uncaughtSignal, output: diagnostic), response)
         }.value
         guard result.0 == 0 else {
             let message: String
             switch result.1.split(separator: ":").first.map(String.init) ?? "failed" {
             case "cancelled": message = L("Setup was cancelled. Retry when ready.", "设置已取消，准备好后可重试。")
-            case "portBusy": message = L("HTTPS port \(port) is occupied or its owner could not be confirmed. Choose another proxy port or stop the conflicting service, then retry.", "HTTPS 端口 \(port) 已被占用或无法确认归属。可更换代理端口，或停止冲突服务后重试。")
+            case "portBusy": message = L("No safe address port was available. Stop projects started through LeftOpen if any, then retry. Other services were left untouched.", "未能找到可安全使用的地址端口。如有通过 LeftOpen 启动的项目，请先停止后重试。其他服务未受影响。")
             case "invalidPort": message = L("Choose a port from 1–65535, excluding 1355–1365 reserved by LeftOpen.", "请选择 1–65535 范围内的端口，避开 LeftOpen 保留的 1355–1365。")
             case "differentOwner": message = L("The address service belongs to another user. Your project is unchanged.", "地址服务属于其他用户，项目未作改动。")
             case "unsafeService", "serviceCheckFailed", "serviceChanged": message = L("The existing address service could not be safely identified. No unrelated service was stopped. Retry setup.", "无法安全确认现有地址服务的归属，未停止其他服务。请重试设置。")
@@ -281,10 +284,15 @@ actor PortlessService {
             }
             throw PortlessServiceError(message: message, diagnostic: result.2)
         }
+        let reportedPort = result.3.split(whereSeparator: \.isNewline).first { $0.hasPrefix("port:") }
+        guard let value = reportedPort.flatMap({ Int($0.dropFirst(5)) }), PortlessConfiguration.validPort(value) else {
+            throw PortlessServiceError(message: L("Could not confirm the address service port. Retry setup.", "无法确认地址服务端口，请重试设置。"))
+        }
+        proxyPort = value
         try requireReadableCertificate(certificate)
         if !certificateTrusted() { try await trustForCurrentUser() }
         for _ in 0..<20 {
-            if await available() { prepared = true; return }
+            if await available() { prepared = true; return proxyPort }
             try await Task.sleep(for: .milliseconds(250))
         }
         throw PortlessServiceError(message: L("HTTPS is not ready yet. Try again shortly.", "HTTPS 尚未就绪，请稍后重试。"),

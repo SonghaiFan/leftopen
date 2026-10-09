@@ -61,6 +61,11 @@ test('route updates preserve wrapper ownership and refuse collisions without sig
   syncRoutes(dir, []);
   assert.equal(store.loadRoutes().find(r => r.hostname === 'app.localhost'), undefined);
   assert.ok(store.loadRoutes().find(r => r.hostname === 'other.localhost'));
+  assert.equal(owner.exitCode, null, 'pausing routes must not stop the project');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'leftopen-leases.json'))).routes, []);
+  syncRoutes(dir, [{hostname:'app.localhost',port:3000,pid:process.pid}]);
+  assert.ok(gateRoutes(store.loadRoutes(), dir).find(r => r.hostname === 'app.localhost'));
+  assert.ok(store.loadRoutes().find(r => r.hostname === 'other.localhost'));
 });
 
 test('project inspection uses upstream config and worktree naming without executing scripts', t => {

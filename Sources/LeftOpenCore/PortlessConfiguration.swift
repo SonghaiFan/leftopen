@@ -1,6 +1,7 @@
 import Foundation
 
 public enum PortlessConfiguration {
+    public static let pausedKey = "leftopen.fixedAddressesPaused"
     public static let portKey = "leftopen.proxyHTTPSPort"
     public static func validPort(_ port: Int) -> Bool {
         (1...65535).contains(port) && !(1355...1365).contains(port)

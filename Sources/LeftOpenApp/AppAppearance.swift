@@ -11,6 +11,7 @@ enum AppAppearance {
     /// A faint fill for fields and notes that sit on the surface.
     static let fill = Color.primary.opacity(0.05)
     static let body = Font.callout
+    static let portNumber = Font.system(.callout, design: .monospaced).weight(.semibold)
     static let secondary = Font.caption
     static let sectionTitle = Font.callout.weight(.semibold)
     static let cornerRadius: CGFloat = 8

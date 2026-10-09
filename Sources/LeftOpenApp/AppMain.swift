@@ -409,8 +409,12 @@ final class MenuModel: ObservableObject {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var appearanceObserver: AnyCancellable?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        appearanceObserver = AppSettings.shared.$appearance.sink { preference in
+            NSApp.appearance = preference.nativeAppearance
+        }
         MainActor.assumeIsolated { UpdateChecker.shared.start() }
     }
 }

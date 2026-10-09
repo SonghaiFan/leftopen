@@ -14,7 +14,6 @@ struct SettingsView: View {
     @State private var doorOpen = true
     @State private var volumePreviewTask: Task<Void, Never>?
     @State private var previewSoundToggle = false
-    @State private var proxyPortText = ""
 
     private var motion: Animation {
         reduceMotion ? .easeInOut(duration: 0.2) : .snappy(duration: 0.28)
@@ -32,14 +31,13 @@ struct SettingsView: View {
             switch navigation.section {
             case .general:
                 generalSettings
+                soundSettings
+            case .ports:
                 monitoringSettings
                 allowlistSettings
+                closingSettings
             case .projects:
                 addressSettings
-                proxySettings
-            case .behavior:
-                closingSettings
-                soundSettings
             case .about:
                 updateSettings
                 aboutSettings
@@ -52,12 +50,15 @@ struct SettingsView: View {
         .controlSize(.small)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
-        .task { await fixed.refreshAddressSetup() }
-        .onAppear { proxyPortText = String(fixed.proxyHTTPSPort) }
-        .onChange(of: fixed.proxyHTTPSPort) { proxyPortText = String(fixed.proxyHTTPSPort) }
+        .task(id: navigation.section) {
+            guard navigation.section == .projects else { return }
+            while !Task.isCancelled {
+                await fixed.refreshAddressSetup()
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
+        }
         .onChange(of: navigation.section) {
             volumePreviewTask?.cancel()
-            if navigation.section == .projects { Task { await fixed.refreshAddressSetup() } }
         }
         .onDisappear { volumePreviewTask?.cancel() }
         .disabled(uninstall.isWorking)
@@ -74,6 +75,11 @@ struct SettingsView: View {
                 Button(L("Uninstall LeftOpen…", "卸载 LeftOpen…"), role: .destructive) {
                     Task { await uninstall.uninstall() }
                 }
+                Text(L("Clean uninstall removes LeftOpen and its settings, local certificates, and background service.",
+                       "彻底卸载 LeftOpen，并清理应用设置、本地证书及后台服务。"))
+                    .font(AppAppearance.secondary)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let error = uninstall.error {
                 Text(error).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -87,6 +93,10 @@ struct SettingsView: View {
             Picker(L("Language", "语言"), selection: $settings.language) {
                 ForEach(LanguagePreference.allCases) { Text($0.title).tag($0) }
             }
+            Picker(L("Appearance", "外观"), selection: $settings.appearance) {
+                ForEach(AppearancePreference.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
             Toggle(L("Open at login", "登录时打开"), isOn: Binding(
                 get: { launchAtLogin.isEnabled },
                 set: { _ in launchAtLogin.toggle() }
@@ -112,17 +122,11 @@ struct SettingsView: View {
 
     private var allowlistSettings: some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L("Hide these ports from the list, search, menu bar count, and change sounds. Services keep running.",
-                       "这些端口不显示在列表、搜索和菜单栏计数中，也不触发变化提示音。服务仍继续运行。"))
-                    .font(AppAppearance.secondary)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                PortAllowlistInput()
-            }
-            .padding(.vertical, 4)
+            PortAllowlistInput()
         } header: {
-            Text(L("Port Allowlist", "端口白名单"))
+            sectionHeader(L("Hidden Ports", "隐藏端口"),
+                help: L("Hidden from the list, search, count and change sounds. Services keep running. Return or comma to add; paste several ports at once.",
+                        "从列表、搜索、计数和变化提示音中隐藏，服务仍继续运行。回车或逗号添加，也可一次粘贴多个端口。"))
         }
     }
 
@@ -219,21 +223,28 @@ struct SettingsView: View {
 
     private var addressSettings: some View {
         Section {
-            LabeledContent(L("Fixed addresses", "固定地址")) {
-                if fixed.isWorking {
+            HStack {
+                if fixed.isWorking || fixed.addressSetupState == .checking {
                     ProgressView().controlSize(.small)
-                } else if fixed.addressesReady {
-                    Label(L("Ready", "已就绪"), systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                } else if fixed.addressSetupState == .checking {
-                    Text(L("Checking…", "正在检查…")).foregroundStyle(.secondary)
-                } else {
-                    Button(fixed.addressSetupState == .needsRepair
-                           ? L("Repair…", "修复…") : L("Set Up…", "设置…")) {
-                        Task { await fixed.configureAddresses() }
-                    }
+                } else if !fixed.addressesPaused && fixed.addressSetupState == .needsRepair {
+                    Button(L("Repair…", "修复…")) { Task { await fixed.configureAddresses() } }
                 }
+                Toggle(L("Fixed addresses", "固定地址"), isOn: Binding(
+                    get: { fixed.addressesReady },
+                    set: { enabled in Task {
+                        if enabled { await fixed.configureAddresses() }
+                        else { await fixed.pauseAddresses() }
+                    } }
+                ))
+                .disabled(fixed.isWorking || fixed.addressSetupState == .checking)
+                .help(L("Turning off removes address routes but keeps bindings, certificates and the installed proxy. Project servers are not stopped.", "关闭后撤下地址路由，保留绑定、证书和已安装的代理，不关闭项目服务器。"))
             }
+            LabeledContent(L("Address service", "地址服务")) {
+                Label(healthTitle, systemImage: healthSymbol)
+                    .foregroundStyle(fixed.addressSetupState == .ready ? Color.green : Color.secondary)
+                    .font(AppAppearance.secondary)
+            }
+            .help(L("Portless proxy health. This does not indicate whether a project server is running.", "Portless 代理的健康状态，不代表项目服务器正在运行。"))
             Toggle(L("Show projects in the panel", "在面板中显示项目"), isOn: $settings.showProjectDock)
             if let error = fixed.setupError {
                 Text(error).foregroundStyle(.orange)
@@ -247,51 +258,23 @@ struct SettingsView: View {
         }
     }
 
-    private var proposedProxyPort: Int? {
-        guard let port = Int(proxyPortText), PortlessConfiguration.validPort(port) else { return nil }
-        return port
+    private var healthTitle: String {
+        if fixed.isWorking { return L("Updating…", "正在更新…") }
+        switch fixed.addressSetupState {
+        case .checking: return L("Checking…", "正在检查…")
+        case .ready: return fixed.addressesPaused ? L("Healthy · addresses off", "正常 · 固定地址已关闭") : L("Healthy", "正常")
+        case .needsSetup: return L("Not configured", "未设置")
+        case .needsRepair: return L("Needs repair", "需要修复")
+        }
     }
 
-    private var proxySettings: some View {
-        Section {
-            LabeledContent(L("HTTPS proxy port", "HTTPS 代理端口")) {
-                TextField("443", text: $proxyPortText)
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 75)
-                    .accessibilityLabel(L("HTTPS proxy port", "HTTPS 代理端口"))
-            }
-            if let port = proposedProxyPort,
-               let example = PortlessConfiguration.address(host: "myapp.localhost", port: port) {
-                Text(example.absoluteString)
-                    .font(AppAppearance.secondary).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            } else {
-                Text(L("Use 1–65535; 1355–1365 are reserved by LeftOpen.", "可使用 1–65535；1355–1365 为 LeftOpen 保留端口。"))
-                    .font(AppAppearance.secondary).foregroundStyle(.orange)
-            }
-            Text(L("If another Portless or HTTPS proxy uses 443, choose a free port such as 8443. Applying restarts LeftOpen's address service and may ask for macOS authorization.",
-                   "若其他 Portless 或 HTTPS 代理占用 443，可选择 8443 等空闲端口。应用会重新设置 LeftOpen 地址服务，并可能请求 macOS 授权。"))
-                .font(AppAppearance.secondary).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button(L("Use default", "使用默认值")) { proxyPortText = "443" }
-                    .disabled(proxyPortText == "443")
-                Spacer()
-                Button(L("Apply and Set Up…", "应用并设置…")) {
-                    guard let port = proposedProxyPort else { return }
-                    Task { await fixed.configureAddresses(port: port) }
-                }
-                .disabled(proposedProxyPort == nil || (fixed.addressesReady && proposedProxyPort == fixed.proxyHTTPSPort))
-            }
-            LabeledContent(L("Bundled engine", "内置引擎")) {
-                Text(fixed.bundledRuntimeVersion).foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(L("Portless", "Portless"))
+    private var healthSymbol: String {
+        if fixed.isWorking || fixed.addressSetupState == .checking { return "clock" }
+        switch fixed.addressSetupState {
+        case .ready: return "checkmark.circle.fill"
+        case .needsRepair: return "exclamationmark.triangle"
+        default: return "minus.circle"
         }
-        .disabled(fixed.isWorking)
     }
 
     /// A section title that carries its explanation as a hover tooltip instead of standing

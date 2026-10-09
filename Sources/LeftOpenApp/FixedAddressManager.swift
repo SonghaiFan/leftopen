@@ -143,6 +143,7 @@ final class FixedAddressManager: ObservableObject {
     @Published private(set) var setupError: String?
     @Published private(set) var setupDiagnostic: FailureDiagnostics?
     @Published private(set) var proxyHTTPSPort = PortlessConfiguration.savedPort()
+    @Published private(set) var addressesPaused = UserDefaults.standard.bool(forKey: PortlessConfiguration.pausedKey)
     var bundledRuntimeVersion: String {
         guard let data = try? Data(contentsOf: FixedAddressEngine.runtime.appendingPathComponent("runtime-lock.json")),
               let lock = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -150,7 +151,7 @@ final class FixedAddressManager: ObservableObject {
               let node = lock["nodeVersion"] as? String else { return "Unknown" }
         return "Portless \(version) · Node \(node)"
     }
-    var addressesReady: Bool { addressSetupState == .ready }
+    var addressesReady: Bool { !addressesPaused && addressSetupState == .ready }
     private var selectedServices: [String: Activity] = [:]
     private var consecutiveFailures = 0
     private var monitor: Task<Void, Never>?
@@ -215,6 +216,30 @@ final class FixedAddressManager: ObservableObject {
     }
 
     /// Only the Settings action can request system authorization.
+    func pauseAddresses() async {
+        guard !isWorking, !uninstalling else { return }
+        isWorking = true
+        setupError = nil
+        setupDiagnostic = nil
+        defer { isWorking = false; startMonitor() }
+        do {
+            guard !(await service.hasRunningProjects()) else {
+                throw FixedAddressError(message: L("Stop projects started through LeftOpen before turning off fixed addresses.", "请先停止通过 LeftOpen 启动的项目，再关闭固定地址。"))
+            }
+            monitor?.cancel(); await monitor?.value; monitor = nil
+            if usesHTTPS { try await service.replace([]) }
+            await engine.stop()
+            addressesPaused = true
+            UserDefaults.standard.set(true, forKey: PortlessConfiguration.pausedKey)
+            urls = [:]; resolvedActivities = [:]; selectedServices = [:]; launchable = []
+            publishCatalog()
+        } catch {
+            setupError = error.localizedDescription
+            setupDiagnostic = (error as? PortlessServiceError)?.diagnostic
+                ?? FailureDiagnostics(stage: "address.pause", code: "failed", error: error as NSError)
+        }
+    }
+
     func configureAddresses(port: Int? = nil) async {
         guard !isWorking, !uninstalling else { return }
         isWorking = true
@@ -232,9 +257,11 @@ final class FixedAddressManager: ObservableObject {
                 }
             }
             monitor?.cancel(); await monitor?.value; monitor = nil
-            try await service.prepare(port: requestedPort)
-            proxyHTTPSPort = requestedPort
-            UserDefaults.standard.set(requestedPort, forKey: PortlessConfiguration.portKey)
+            let selectedPort = try await service.prepare(port: requestedPort)
+            addressesPaused = false
+            UserDefaults.standard.set(false, forKey: PortlessConfiguration.pausedKey)
+            proxyHTTPSPort = selectedPort
+            UserDefaults.standard.set(selectedPort, forKey: PortlessConfiguration.portKey)
             addressSetupState = .ready
             usesHTTPS = true
             UserDefaults.standard.set(true, forKey: "leftopen.fixedAddressHTTPS")
@@ -252,6 +279,10 @@ final class FixedAddressManager: ObservableObject {
     }
 
     private func requireConfiguredAddresses() async -> Bool {
+        guard !addressesPaused else {
+            SettingsWindowController.shared.show(section: .projects)
+            return false
+        }
         if await service.available() { addressSetupState = .ready; return true }
         addressSetupState = usesHTTPS ? .needsRepair : .needsSetup
         SettingsWindowController.shared.show(section: .projects)
@@ -388,7 +419,7 @@ final class FixedAddressManager: ObservableObject {
 
     private func startMonitor() {
         monitor?.cancel()
-        guard !bindings.isEmpty, !uninstalling else { return }
+        guard !bindings.isEmpty, !uninstalling, !addressesPaused else { return }
         monitor = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -417,7 +448,7 @@ final class FixedAddressManager: ObservableObject {
     }
 
     private func reconcile(_ activities: [Activity], publish: Bool = true) async throws {
-        guard !uninstalling else { throw CancellationError() }
+        guard !uninstalling, !addressesPaused else { throw CancellationError() }
         if bindings.isEmpty {
             await engine.stop()
             if usesHTTPS { try? await service.replace([]) }
@@ -476,6 +507,7 @@ final class FixedAddressManager: ObservableObject {
 
     func start(_ binding: FixedAddressBinding) async {
         guard !isWorking, !uninstalling else { return }
+        guard !addressesPaused else { SettingsWindowController.shared.show(section: .projects); return }
         isWorking = true
         error = nil
         defer { isWorking = false; startMonitor() }

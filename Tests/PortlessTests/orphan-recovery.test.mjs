@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-function fixture(entry, mode = 'orphan', port, oldPort = '443', foreignPort = '0') {
+function fixture(entry, mode = 'orphan', port, oldPort = '443', foreignPort = '0', automatic = false) {
   const args = entry === 'setup' ? ['/source', '/Users/fixture', 'fixture', '501', '20']
     : ['/Users/fixture', 'fixture', '501', '-'];
   if (entry === 'setup' && port !== undefined) args.push(port);
+  if (automatic) args.push('auto');
   const result = spawnSync(process.execPath, ['--import', './Tests/PortlessTests/fixtures/orphan-installation.mjs',
     `Resources/Portless/${entry}.mjs`, ...args], {encoding: 'utf8', timeout: 10000,
     env: {...process.env, LEFTOPEN_FIXTURE_MODE: mode, LEFTOPEN_FIXTURE_PORT: oldPort,
@@ -20,6 +21,20 @@ test('custom HTTPS port installs while an unrelated proxy keeps 443', () => {
   assert.ok(!result.trace.some(([, args]) => args[0] === 'bootout'));
   const install = result.trace.find(([, args]) => args[1] === 'service' && args[2] === 'install');
   assert.equal(install[1].at(-1), '8443');
+});
+
+test('automatic setup avoids foreign 443 without stopping it and reports the selected port', () => {
+  const result = fixture('setup', 'fresh', '443', '443', '443', true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /port:8443/);
+  assert.ok(!result.trace.some(([, args]) => args[0] === 'bootout'));
+  assert.equal(result.trace.find(([, args]) => args[1] === 'service' && args[2] === 'install')[1].at(-1), '8443');
+});
+
+test('automatic repair keeps the verified owned port', () => {
+  const result = fixture('setup', 'orphan', '443', '8443', '0', true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /port:8443/);
 });
 
 test('port migration verifies and stops only the owned old listener', () => {

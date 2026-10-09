@@ -31,6 +31,8 @@ jobs:
           brew ruby Tests/HomebrewTests/integration.rb
       - name: Test Swift package
         run: swift test
+      - name: Test legacy icon packaging
+        run: python3 Tests/test_legacy_app_icon.py
       - name: Build app and CLI
         run: zsh Scripts/build-app.sh
         env:

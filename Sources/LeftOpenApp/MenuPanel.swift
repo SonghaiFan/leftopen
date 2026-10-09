@@ -766,7 +766,7 @@ struct MenuPanel: View {
             Text(scanUnavailable ? L("Unable to scan", "无法扫描") : nothingListening ? L("Nothing left open", "没有虚掩的门") : L("No matching ports", "没有匹配的端口"))
                 .font(.headline)
             Text(scanUnavailable ? L("Check the message above, then refresh.", "请查看上方提示，然后刷新。")
-                : nothingListening ? (hasHiddenPorts ? L("Allowlisted ports are hidden. Manage them in Settings.", "白名单中的端口已隐藏，可在设置中管理。") : L("No TCP listeners on this Mac.", "这台 Mac 上没有 TCP 监听。")) : L("Try a port number, process name, or PID.", "试试端口号、进程名或 PID。"))
+                : nothingListening ? (hasHiddenPorts ? L("Some ports are hidden. Manage them in Settings → Ports.", "部分端口已隐藏，可在设置 → 端口中管理。") : L("No TCP listeners on this Mac.", "这台 Mac 上没有 TCP 监听。")) : L("Try a port number, process name, or PID.", "试试端口号、进程名或 PID。"))
                 .font(AppAppearance.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1107,9 +1107,9 @@ struct MenuPanel: View {
             copy(ports.map(String.init).joined(separator: ", "))
         }
         if ports.count == 1, let port = ports.first {
-            Button(L("Add to Port Allowlist", "加入端口白名单")) { settings.addIgnoredPort(port) }
+            Button(L("Hide Port", "隐藏端口")) { settings.addIgnoredPort(port) }
         } else {
-            Menu(L("Add to Port Allowlist", "加入端口白名单")) {
+            Menu(L("Hide Port", "隐藏端口")) {
                 ForEach(ports, id: \.self) { port in
                     Button(String(port)) { settings.addIgnoredPort(port) }
                 }
@@ -1375,7 +1375,7 @@ private struct PortRow: View {
                 HStack(spacing: 4) {
                     if let port {
                         Text(String(port))
-                            .font(.system(.callout, design: .monospaced).weight(.semibold))
+                            .font(AppAppearance.portNumber)
                         if fixedName != nil {
                             Image(systemName: "link")
                                 .font(.system(size: 10, weight: .semibold))
