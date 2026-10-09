@@ -3,7 +3,6 @@
   <h1>LeftOpen</h1>
   <p><strong>Native macOS Menu Bar Port Manager &amp; CLI</strong></p>
   <p><em>See what your tools left running on localhost, identify projects, and gently close them.</em></p>
-  <p>把那些虚掩着的门，轻轻关上。</p>
 
   <p>
     <a href="https://leftopen.songhai.site/"><img src="https://img.shields.io/badge/website-songhai.site-211811?style=flat-square" alt="Website" /></a>
