@@ -5,12 +5,16 @@ import net from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { noLinks, repairUserDirectories, installAddressService } from './setup-policy.mjs';
 import { ownedService, assertOwnedHTTPSListener, stopOwnedService } from './service-identity.mjs';
+import { proxyPort, selectProxyPort } from './proxy-config.mjs';
 const label = 'app.leftopen.portless.proxy';
 const protectedRoot = '/Library/Application Support/LeftOpen/Portless';
 const plist = `/Library/LaunchDaemons/${label}.plist`;
 function fail(code) { process.stderr.write(code + '\n'); process.exit(1); }
 if (process.getuid() !== 0) fail('authorizationRequired');
-const [source, home, user, uidText, gidText] = process.argv.slice(2);
+const [source, home, user, uidText, gidText, requestedPort, selection] = process.argv.slice(2);
+if (selection !== undefined && selection !== 'auto') fail('invalidPort');
+let port;
+try { port = proxyPort(requestedPort); } catch { fail('invalidPort'); }
 if (!source || !home || !/^[a-zA-Z0-9_.-]+$/.test(user) || !/^[0-9]+$/.test(uidText) || Number(uidText) === 0) fail('invalidOwner');
 const uid = Number(uidText), gid = Number(gidText);
 const identity = spawnSync('/usr/bin/id', ['-u', user], { encoding: 'utf8' });
@@ -34,17 +38,31 @@ function run(command, args) {
   return spawnSync(command, args, {encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,
     env: {PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL: 'C'}});
 }
-async function busy() {
+async function busyOn(port, host) {
   const probe = net.createServer();
   return new Promise((resolve, reject) => {
     probe.once('error', error => error.code === 'EADDRINUSE' ? resolve(true) : reject(new Error('portCheckFailed')));
-    probe.listen(443, '127.0.0.1', () => probe.close(() => resolve(false)));
+    probe.listen(port, host, () => probe.close(() => resolve(false)));
   });
+}
+async function busy(port) {
+  return await busyOn(port, '127.0.0.1') || await busyOn(port, '::1');
 }
 let service;
 try {
   service = ownedService(home, run);
-  if (await busy()) assertOwnedHTTPSListener(service, run);
+  if (selection === 'auto') {
+    // A prior authorized install may have succeeded before GUI trust was cancelled.
+    // Reuse its verified configuration instead of migrating on every retry.
+    if (service) port = service.port;
+    port = await selectProxyPort(port, busy, () => {
+      try { assertOwnedHTTPSListener(service, run, port); return true; }
+      catch (error) { if (error.message === 'portBusy') return false; throw error; }
+    });
+  }
+  // Check the new endpoint before stopping a working old service.
+  if (await busy(port)) assertOwnedHTTPSListener(service, run, port);
+  if (service && service.port !== port && await busy(service.port)) assertOwnedHTTPSListener(service, run);
 } catch (error) { fail(error.message); }
 try { repairUserDirectories(home, uid, gid); }
 catch (error) { fail(['unsafePath', 'differentOwner', 'invalidOwner'].includes(error.message)
@@ -52,7 +70,7 @@ catch (error) { fail(['unsafePath', 'differentOwner', 'invalidOwner'].includes(e
 try {
   await stopOwnedService(home, service, run);
   // A verified service may need a moment to release its socket after bootout.
-  for (let attempt = 0; await busy(); attempt++) {
+  for (let attempt = 0; await busy(port); attempt++) {
     if (attempt >= 20) throw new Error('portBusy');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -77,7 +95,7 @@ function protect(file) {
 protect(protectedRoot);
 const env = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: home, SUDO_USER: user,
   SUDO_UID: String(uid), SUDO_GID: String(gid), PORTLESS_STATE_DIR: directory,
-  PORTLESS_SYNC_HOSTS: '1', PORTLESS_HTTPS: '1', PORTLESS_PORT: '443', PORTLESS_LAN: '0',
+  PORTLESS_SYNC_HOSTS: '1', PORTLESS_HTTPS: '1', PORTLESS_PORT: String(port), PORTLESS_LAN: '0',
   PORTLESS_TLD: 'localhost', NO_COLOR: '1' };
 const cli = path.join(protectedRoot, 'package/dist/cli.js');
 try { installAddressService(protectedNode, cli, directory, env, spawnSync); }
@@ -87,4 +105,4 @@ const trust = spawnSync('/usr/bin/sudo', ['-u', user, '/usr/bin/security', 'veri
   { env, encoding: 'utf8', timeout: 30000 });
 // The native app completes trust in the GUI user's authorization session when needed.
 // Service installation and certificate trust are separate readiness checks.
-process.stdout.write(trust.status === 0 ? 'ready\n' : 'trustRequired\n');
+process.stdout.write(`${trust.status === 0 ? 'ready' : 'trustRequired'}\nport:${port}\n`);

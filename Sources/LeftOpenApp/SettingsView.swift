@@ -31,13 +31,13 @@ struct SettingsView: View {
             switch navigation.section {
             case .general:
                 generalSettings
+                soundSettings
+            case .ports:
                 monitoringSettings
                 allowlistSettings
+                closingSettings
             case .projects:
                 addressSettings
-            case .behavior:
-                closingSettings
-                soundSettings
             case .about:
                 updateSettings
                 aboutSettings
@@ -50,10 +50,15 @@ struct SettingsView: View {
         .controlSize(.small)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
-        .task { await fixed.refreshAddressSetup() }
+        .task(id: navigation.section) {
+            guard navigation.section == .projects else { return }
+            while !Task.isCancelled {
+                await fixed.refreshAddressSetup()
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
+        }
         .onChange(of: navigation.section) {
             volumePreviewTask?.cancel()
-            if navigation.section == .projects { Task { await fixed.refreshAddressSetup() } }
         }
         .onDisappear { volumePreviewTask?.cancel() }
         .disabled(uninstall.isWorking)
@@ -70,6 +75,11 @@ struct SettingsView: View {
                 Button(L("Uninstall LeftOpen…", "卸载 LeftOpen…"), role: .destructive) {
                     Task { await uninstall.uninstall() }
                 }
+                Text(L("Clean uninstall removes LeftOpen and its settings, local certificates, and background service.",
+                       "彻底卸载 LeftOpen，并清理应用设置、本地证书及后台服务。"))
+                    .font(AppAppearance.secondary)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let error = uninstall.error {
                 Text(error).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -83,6 +93,10 @@ struct SettingsView: View {
             Picker(L("Language", "语言"), selection: $settings.language) {
                 ForEach(LanguagePreference.allCases) { Text($0.title).tag($0) }
             }
+            Picker(L("Appearance", "外观"), selection: $settings.appearance) {
+                ForEach(AppearancePreference.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
             Toggle(L("Open at login", "登录时打开"), isOn: Binding(
                 get: { launchAtLogin.isEnabled },
                 set: { _ in launchAtLogin.toggle() }
@@ -108,17 +122,11 @@ struct SettingsView: View {
 
     private var allowlistSettings: some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L("Hide these ports from the list, search, menu bar count, and change sounds. Services keep running.",
-                       "这些端口不显示在列表、搜索和菜单栏计数中，也不触发变化提示音。服务仍继续运行。"))
-                    .font(AppAppearance.secondary)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                PortAllowlistInput()
-            }
-            .padding(.vertical, 4)
+            PortAllowlistInput()
         } header: {
-            Text(L("Port Allowlist", "端口白名单"))
+            sectionHeader(L("Hidden Ports", "隐藏端口"),
+                help: L("Hidden from the list, search, count and change sounds. Services keep running. Return or comma to add; paste several ports at once.",
+                        "从列表、搜索、计数和变化提示音中隐藏，服务仍继续运行。回车或逗号添加，也可一次粘贴多个端口。"))
         }
     }
 
@@ -215,21 +223,28 @@ struct SettingsView: View {
 
     private var addressSettings: some View {
         Section {
-            LabeledContent(L("Fixed addresses", "固定地址")) {
-                if fixed.isWorking {
+            HStack {
+                if fixed.isWorking || fixed.addressSetupState == .checking {
                     ProgressView().controlSize(.small)
-                } else if fixed.addressesReady {
-                    Label(L("Ready", "已就绪"), systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                } else if fixed.addressSetupState == .checking {
-                    Text(L("Checking…", "正在检查…")).foregroundStyle(.secondary)
-                } else {
-                    Button(fixed.addressSetupState == .needsRepair
-                           ? L("Repair…", "修复…") : L("Set Up…", "设置…")) {
-                        Task { await fixed.configureAddresses() }
-                    }
+                } else if !fixed.addressesPaused && fixed.addressSetupState == .needsRepair {
+                    Button(L("Repair…", "修复…")) { Task { await fixed.configureAddresses() } }
                 }
+                Toggle(L("Fixed addresses", "固定地址"), isOn: Binding(
+                    get: { fixed.addressesReady },
+                    set: { enabled in Task {
+                        if enabled { await fixed.configureAddresses() }
+                        else { await fixed.pauseAddresses() }
+                    } }
+                ))
+                .disabled(fixed.isWorking || fixed.addressSetupState == .checking)
+                .help(L("Turning off removes address routes but keeps bindings, certificates and the installed proxy. Project servers are not stopped.", "关闭后撤下地址路由，保留绑定、证书和已安装的代理，不关闭项目服务器。"))
             }
+            LabeledContent(L("Address service", "地址服务")) {
+                Label(healthTitle, systemImage: healthSymbol)
+                    .foregroundStyle(fixed.addressSetupState == .ready ? Color.green : Color.secondary)
+                    .font(AppAppearance.secondary)
+            }
+            .help(L("Portless proxy health. This does not indicate whether a project server is running.", "Portless 代理的健康状态，不代表项目服务器正在运行。"))
             Toggle(L("Show projects in the panel", "在面板中显示项目"), isOn: $settings.showProjectDock)
             if let error = fixed.setupError {
                 Text(error).foregroundStyle(.orange)
@@ -238,8 +253,27 @@ struct SettingsView: View {
             }
         } header: {
             sectionHeader(L("Project Addresses", "项目地址"),
-                help: L("Stable addresses like https://myapp.localhost that follow a project across ports. Setup asks macOS once to trust a local certificate, run a loopback-only service on port 443, and manage exact hosts entries (“osascript” and “security” may ask separately). Project files are never changed; hiding projects keeps their addresses.",
-                        "使用 https://myapp.localhost 这样的固定地址，端口变化后自动跟随。首次设置会向 macOS 请求一次授权：信任本地证书、运行只监听本机的 443 服务、管理精确的 hosts 条目（「osascript」和「security」可能分别弹窗）。不修改项目文件；隐藏项目不会停用地址。"))
+                help: L("Stable addresses that follow a project across ports. Setup asks macOS to trust a local certificate, run a loopback-only HTTPS proxy on your chosen port, and manage exact hosts entries. Hiding projects keeps their addresses.",
+                        "固定地址会随项目端口变化自动跟随。设置会向 macOS 请求授权：信任本地证书、在指定端口运行只监听本机的 HTTPS 代理，并管理精确的 hosts 条目。隐藏项目不会停用地址。"))
+        }
+    }
+
+    private var healthTitle: String {
+        if fixed.isWorking { return L("Updating…", "正在更新…") }
+        switch fixed.addressSetupState {
+        case .checking: return L("Checking…", "正在检查…")
+        case .ready: return fixed.addressesPaused ? L("Healthy · addresses off", "正常 · 固定地址已关闭") : L("Healthy", "正常")
+        case .needsSetup: return L("Not configured", "未设置")
+        case .needsRepair: return L("Needs repair", "需要修复")
+        }
+    }
+
+    private var healthSymbol: String {
+        if fixed.isWorking || fixed.addressSetupState == .checking { return "clock" }
+        switch fixed.addressSetupState {
+        case .ready: return "checkmark.circle.fill"
+        case .needsRepair: return "exclamationmark.triangle"
+        default: return "minus.circle"
         }
     }
 

@@ -113,6 +113,7 @@ jobs:
       - name: Test
         run: |
           python3 -m unittest discover -s Tests/ReleaseTests
+          python3 Tests/test_legacy_app_icon.py
           ruby Tests/HomebrewTests/uninstall_test.rb
           brew ruby Tests/HomebrewTests/integration.rb
           swift test
@@ -154,6 +155,7 @@ jobs:
           ditto -x -k LeftOpen-release.zip verified
           app="$LEFTOPEN_OUTPUT_DIR/verified/LeftOpen.app"
           "$GITHUB_WORKSPACE/Scripts/verify-universal-app.sh" "$app"
+          swift "$GITHUB_WORKSPACE/Scripts/legacy-app-icon.swift" verify "$GITHUB_WORKSPACE/Resources/AppIcon.icns" "$app"
           codesign --verify --deep --strict --all-architectures "$app"
           python3 "$GITHUB_WORKSPACE/Scripts/verify-portless-runtime.py" "$app/Contents/Resources/Portless"
           xcrun stapler validate "$app"

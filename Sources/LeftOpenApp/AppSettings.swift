@@ -1,6 +1,26 @@
 import Combine
+import AppKit
 import Foundation
 import LeftOpenCore
+
+public enum AppearancePreference: String, CaseIterable, Identifiable {
+    case system, light, dark
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .system: L("System", "跟随系统")
+        case .light: L("Light", "浅色")
+        case .dark: L("Dark", "深色")
+        }
+    }
+    var nativeAppearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
 
 /// The Settings choice; `.system` follows the Mac's preferred languages.
 public enum LanguagePreference: String, CaseIterable, Identifiable {
@@ -75,6 +95,7 @@ public final class AppSettings: ObservableObject {
         static let refreshInterval = "leftopen.refreshInterval"
         static let menuBarBadgeMode = "leftopen.menuBarBadgeMode"
         static let language = "leftopen.language"
+        static let appearance = "leftopen.appearance"
         static let checkForUpdates = "leftopen.checkForUpdates"
         static let safetyProtectionEnabled = "leftopen.safetyProtectionEnabled"
         static let soundEffectsEnabled = "leftopen.soundEffectsEnabled"
@@ -83,6 +104,10 @@ public final class AppSettings: ObservableObject {
     }
 
     private let defaults: UserDefaults
+
+    @Published public var appearance: AppearancePreference {
+        didSet { defaults.set(appearance.rawValue, forKey: Keys.appearance) }
+    }
 
     @Published public var refreshInterval: RefreshInterval {
         didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) }
@@ -147,6 +172,7 @@ public final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        appearance = AppearancePreference(rawValue: defaults.string(forKey: Keys.appearance) ?? "system") ?? .system
         ignoredPorts = Array(Set(defaults.array(forKey: Keys.ignoredPorts) as? [Int] ?? []))
             .filter { (1...65535).contains($0) }.sorted()
         let storedInterval = defaults.object(forKey: Keys.refreshInterval) as? Int ?? RefreshInterval.minute1.rawValue

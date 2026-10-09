@@ -4,6 +4,7 @@ import CoreFoundation
 /// A shareable snapshot, not a raw log. Discard sensitive subprocess output at construction.
 public struct FailureDiagnostics: Sendable, Equatable {
     public let text: String
+    public let code: String
 
     public init(stage: String, code: String, tool: String? = nil, exitCode: Int32? = nil,
                 signal: Bool = false, output: String = "", error: NSError? = nil,
@@ -15,6 +16,7 @@ public struct FailureDiagnostics: Sendable, Equatable {
             guard let value, value.range(of: #"\A[A-Za-z0-9_.:-]{1,80}\z"#, options: .regularExpression) != nil else { return "unknown" }
             return value
         }
+        self.code = tag(code)
         let os = ProcessInfo.processInfo.operatingSystemVersion
         #if arch(arm64)
         let arch = "arm64"

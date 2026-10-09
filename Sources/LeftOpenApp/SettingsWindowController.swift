@@ -4,22 +4,25 @@ import LeftOpenCore
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, projects, behavior, about
+    case general, ports, projects, about
+    static func restored(_ value: String?) -> Self {
+        value == "behavior" ? .ports : (value.flatMap(Self.init(rawValue:)) ?? .general)
+    }
     var id: Self { self }
     var toolbarID: NSToolbarItem.Identifier { .init(rawValue) }
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .ports: "network"
         case .projects: "folder"
-        case .behavior: "slider.horizontal.3"
         case .about: "info.circle"
         }
     }
     var title: String {
         switch self {
         case .general: L("General", "通用")
+        case .ports: L("Ports", "端口")
         case .projects: L("Projects", "项目")
-        case .behavior: L("Behavior", "行为")
         case .about: L("About", "关于")
         }
     }
@@ -29,8 +32,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate, ObservableObject {
     static let shared = SettingsWindowController()
 
-    @Published var section: SettingsSection = SettingsSection(rawValue:
-        UserDefaults.standard.string(forKey: "leftopen.settingsSection") ?? "general") ?? .general {
+    @Published var section: SettingsSection = .restored(
+        UserDefaults.standard.string(forKey: "leftopen.settingsSection")) {
         didSet {
             if ProcessInfo.processInfo.environment["LEFTOPEN_SETTINGS_SNAPSHOT"] == nil {
                 UserDefaults.standard.set(section.rawValue, forKey: "leftopen.settingsSection")

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { commandDiagnostic } from './diagnostics.mjs';
+import { proxyPort } from './proxy-config.mjs';
 
 function statIfPresent(file, io) {
   try { return io.lstatSync(file); }
@@ -60,9 +61,10 @@ export function checkedSetupResult(result, stage) {
 }
 
 export function installAddressService(node, cli, directory, env, spawn) {
+  const port = proxyPort(env.PORTLESS_PORT);
   // launchd refuses bootstrap for a disabled label. Enable only LeftOpen's label first.
   checkedSetupResult(spawn('/bin/launchctl', ['enable', 'system/app.leftopen.portless.proxy'],
     { env, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024 }), 'launchdEnableFailed');
-  checkedSetupResult(spawn(node, [cli, 'service', 'install', '--state-dir', directory, '--https', '--port', '443'],
+  checkedSetupResult(spawn(node, [cli, 'service', 'install', '--state-dir', directory, '--https', '--port', String(port)],
     { env, encoding: 'utf8', timeout: 120000, maxBuffer: 1024 * 1024 }), 'serviceInstallFailed');
 }

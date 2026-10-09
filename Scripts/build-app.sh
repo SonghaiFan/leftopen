@@ -32,10 +32,9 @@ for executable in LeftOpenApp leftopen; do
 done
 "${project_dir}/Scripts/verify-universal-app.sh" "$app_path"
 cp "${project_dir}/Resources/Info.plist" "${app_path}/Contents/Info.plist"
-if [[ -f "${project_dir}/Resources/AppIcon.icns" ]]; then
-  mkdir -p "${app_path}/Contents/Resources"
-  cp "${project_dir}/Resources/AppIcon.icns" "${app_path}/Contents/Resources/AppIcon.icns"
-fi
+mkdir -p "${app_path}/Contents/Resources"
+swift "${project_dir}/Scripts/legacy-app-icon.swift" generate \
+  "${project_dir}/Resources/AppIcon.icns" "${app_path}/Contents/Resources/AppIcon.icns"
 resource_bundle="${binary_dir}/LeftOpen_LeftOpenApp.bundle"
 if [[ -d "$resource_bundle" ]]; then
   mkdir -p "${app_path}/Contents/Resources"
@@ -48,6 +47,7 @@ mkdir -p "${app_path}/Contents/Resources/Portless"
 cp -R "${project_dir}/.build/portless-runtime/." "${app_path}/Contents/Resources/Portless/"
 zsh "${project_dir}/Scripts/sign-portless-runtime.sh" "${app_path}/Contents/Resources/Portless"
 plutil -replace CFBundleIdentifier -string "$bundle_id" "${app_path}/Contents/Info.plist"
+swift "${project_dir}/Scripts/legacy-app-icon.swift" verify "${project_dir}/Resources/AppIcon.icns" "$app_path"
 # Sign nested code before the bundle, which signs the main executable too.
 codesign --force --sign - "${app_path}/Contents/MacOS/leftopen"
 codesign --force --sign - "$app_path"

@@ -17,7 +17,8 @@ const home = '/Users/fixture', state = `${home}/Library/Application Support/Left
 const runtime = '/Library/Application Support/LeftOpen/Portless';
 const plist = '/Library/LaunchDaemons/app.leftopen.portless.proxy.plist';
 const node = `${runtime}/node-${process.arch === 'arm64' ? 'arm64' : 'x64'}`;
-const args = [node, `${runtime}/package/dist/cli.js`, 'proxy', 'start', '--foreground', '--port', '443', '--https', '--skip-trust'];
+const args = [node, `${runtime}/package/dist/cli.js`, 'proxy', 'start', '--foreground', '--port', process.env.LEFTOPEN_FIXTURE_PORT ?? '443', '--https', '--skip-trust'];
+const foreignPort = Number(process.env.LEFTOPEN_FIXTURE_FOREIGN_PORT ?? 0);
 const value = {Label: 'app.leftopen.portless.proxy', ProgramArguments: args,
   EnvironmentVariables: {PORTLESS_STATE_DIR: mode === 'other-user' ? '/Users/other/state' : state}};
 let loaded = !['fresh', 'dormant'].includes(mode);
@@ -70,7 +71,7 @@ childProcess.spawnSync = (command, argv) => {
   if (command === '/usr/bin/dscl') return ok(`NFSHomeDirectory: ${home}\n`);
   if (command === '/usr/bin/plutil') return ok(JSON.stringify(value));
   if (command === '/bin/ps') return ok(`${mode === 'wrong-process' ? 501 : 0} ${node}\n`);
-  if (command === '/usr/sbin/lsof') return ok(mode === 'foreign-listener' ? 'p9000\n' : 'p4478\n');
+  if (command === '/usr/sbin/lsof') return ok(mode === 'foreign-listener' || argv.includes(`-iTCP:${foreignPort}`) ? 'p9000\n' : 'p4478\n');
   if (command === '/bin/launchctl') {
     if (argv[0] === 'print') {
       inspections++;
@@ -94,6 +95,7 @@ childProcess.spawnSync = (command, argv) => {
   }
   if (command === node && argv[1] === 'service' && argv[2] === 'install') {
     if (loaded) throw new Error('oldServiceStillLoaded');
+    args[6] = argv[argv.indexOf('--port') + 1];
     loaded = true; return ok('');
   }
   if (command === '/usr/bin/sudo' && argv.includes('verify-cert')) return {status: 1, stdout: '', stderr: ''};
@@ -101,8 +103,8 @@ childProcess.spawnSync = (command, argv) => {
 };
 net.createServer = () => {
   const server = new EventEmitter();
-  server.listen = (_port, _host, callback) => queueMicrotask(() => {
-    if (loaded) server.emit('error', Object.assign(new Error('busy'), {code: 'EADDRINUSE'}));
+  server.listen = (port, _host, callback) => queueMicrotask(() => {
+    if ((loaded && port === Number(args[6])) || port === foreignPort) server.emit('error', Object.assign(new Error('busy'), {code: 'EADDRINUSE'}));
     else callback();
   });
   server.close = callback => callback();

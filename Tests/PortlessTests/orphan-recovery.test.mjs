@@ -2,15 +2,74 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-function fixture(entry, mode = 'orphan') {
+function fixture(entry, mode = 'orphan', port, oldPort = '443', foreignPort = '0', automatic = false) {
   const args = entry === 'setup' ? ['/source', '/Users/fixture', 'fixture', '501', '20']
     : ['/Users/fixture', 'fixture', '501', '-'];
+  if (entry === 'setup' && port !== undefined) args.push(port);
+  if (automatic) args.push('auto');
   const result = spawnSync(process.execPath, ['--import', './Tests/PortlessTests/fixtures/orphan-installation.mjs',
     `Resources/Portless/${entry}.mjs`, ...args], {encoding: 'utf8', timeout: 10000,
-    env: {...process.env, LEFTOPEN_FIXTURE_MODE: mode}});
+    env: {...process.env, LEFTOPEN_FIXTURE_MODE: mode, LEFTOPEN_FIXTURE_PORT: oldPort,
+      LEFTOPEN_FIXTURE_FOREIGN_PORT: foreignPort}});
   const record = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('FIXTURE:')).slice(8));
   return {...result, ...record};
 }
+
+test('custom HTTPS port installs while an unrelated proxy keeps 443', () => {
+  const result = fixture('setup', 'fresh', '8443', '443', '443');
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!result.trace.some(([, args]) => args[0] === 'bootout'));
+  const install = result.trace.find(([, args]) => args[1] === 'service' && args[2] === 'install');
+  assert.equal(install[1].at(-1), '8443');
+});
+
+test('automatic setup avoids foreign 443 without stopping it and reports the selected port', () => {
+  const result = fixture('setup', 'fresh', '443', '443', '443', true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /port:8443/);
+  assert.ok(!result.trace.some(([, args]) => args[0] === 'bootout'));
+  assert.equal(result.trace.find(([, args]) => args[1] === 'service' && args[2] === 'install')[1].at(-1), '8443');
+});
+
+test('automatic repair keeps the verified owned port', () => {
+  const result = fixture('setup', 'orphan', '443', '8443', '0', true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /port:8443/);
+});
+
+test('port migration verifies and stops only the owned old listener', () => {
+  const result = fixture('setup', 'orphan', '8443');
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.trace.some(([command, args]) => command === '/usr/sbin/lsof' && args.includes('-iTCP:443')));
+  assert.ok(result.trace.some(([, args]) => args[0] === 'bootout'));
+  assert.equal(result.trace.find(([, args]) => args[1] === 'service' && args[2] === 'install')[1].at(-1), '8443');
+});
+
+test('busy new port leaves the working old service and files untouched', () => {
+  const result = fixture('setup', 'orphan', '8443', '443', '8443');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /portBusy/);
+  assert.ok(!result.trace.some(([, args]) => args[0] === 'bootout'));
+  assert.deepEqual(result.deleted, []);
+});
+
+test('custom-port service still supports exact-identity uninstall and migration back to 443', () => {
+  const removed = fixture('uninstall', 'orphan', undefined, '8443');
+  assert.equal(removed.status, 0, removed.stderr);
+  const migrated = fixture('setup', 'orphan', '443', '8443');
+  assert.equal(migrated.status, 0, migrated.stderr);
+  assert.ok(migrated.trace.some(([command, args]) => command === '/usr/sbin/lsof' && args.includes('-iTCP:8443')));
+});
+
+test('invalid or reserved ports are rejected before privileged actions', () => {
+  for (const port of ['0', '65536', '1355', '1365', '443;id', '08443']) {
+    const result = fixture('setup', 'fresh', port);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /invalidPort/);
+    assert.deepEqual(result.trace, []);
+    assert.deepEqual(result.deleted, []);
+  }
+});
 
 test('real setup entry recovers missing PID/certificate/runtime with an owned live daemon', () => {
   const result = fixture('setup');

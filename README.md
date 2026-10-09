@@ -57,7 +57,8 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 - **Grouped by who started them.** Dev Servers (from a project, terminal, editor or agent), Background Services (launchd: brew services, login items), Apps and System. The group is also how a port is closed for good, and each one says so: SIGTERM for dev servers, `brew services stop …` for services launchd would restart, quitting the app for apps.
 - **Closes gently first.** Sends `SIGTERM` and re-checks process identity. If a single-process close still leaves it listening after five seconds, that process is marked and the warning explains that closing it again within two minutes sends `SIGKILL`. The second click or swipe is the deliberate force-close action; existing safety protections and identity checks still apply.
 - **Local vs LAN.** Tells apart ports bound to `127.0.0.1` from ones on `0.0.0.0` or a LAN address.
-- **Port allowlist.** Hide selected ports from the list, search, menu bar count, and change sounds in **Settings → General → Port Allowlist**, or add a port from its context menu. Enter ports with Return or commas, or paste several at once. Each saved port becomes a tag; click its × to show that port again. Services keep running; this is a display preference, not process protection.
+- **Hidden ports.** Hide selected ports from the list, search, menu bar count, and change sounds in **Settings → Ports → Hidden Ports**, or choose **Hide Port** from its context menu. Enter ports with Return or commas, or paste several at once. Each saved port becomes a tag; click its × to show that port again. Services keep running.
+- **Appearance.** Choose System, Light or Dark in **Settings → General**, alongside language, login startup and sounds. **Projects** shows the local address service's health.
 - **Quiet by default.** Native SwiftUI `MenuBarExtra`. No Dock icon, no telemetry, and no background service unless you opt into fixed addresses. The only request that leaves this Mac is a daily check of the latest GitHub release, which you can turn off in Settings.
 - **Fixed project addresses.** Give a dev server a stable `https://myapp.localhost` URL that follows it across port changes, powered by bundled [Portless](https://github.com/vercel-labs/portless). See [below](#fixed-project-addresses).
 - **Same engine in the terminal.** The app ships a `leftopen` CLI with identical inference and safety rules.
@@ -68,7 +69,7 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 
 Dev servers move between ports; their address doesn't have to. LeftOpen bundles [Portless](https://github.com/vercel-labs/portless) 0.15.7 and Node 24.14.0, so there's nothing extra to install.
 
-1. **One-time setup:** **Settings → Projects → Local project addresses → Set up once.** macOS asks for authorization to trust a local CA, install a loopback-only HTTPS service on port 443, and manage exact `/etc/hosts` entries. Only this Settings button ever asks; project actions and background scans never do.
+1. **One-time setup:** Turn on **Settings → Projects → Fixed addresses**. macOS asks for authorization to trust a local CA, install a loopback-only HTTPS service on the selected proxy port (443 by default), and manage exact `/etc/hosts` entries. Only explicit Settings actions ask; project actions and background scans never do.
 2. **Per project:** start the project as usual, then click **Enable fixed address** in its port details. It's reachable at `https://myapp.localhost`.
 
 How it behaves:
@@ -79,6 +80,8 @@ How it behaves:
 - **For agents and scripts:** `leftopen url [name|port|path]` prints verified addresses (`--json` for structured output), and `leftopen --json` includes `fixedURL` for matching services.
 
 Earlier HTTP addresses keep working; finish the HTTPS upgrade from the same Settings page. Portless (Apache-2.0) and Node ship with their licenses.
+
+**Address settings:** Settings → Projects has a single fixed-address row, with no manual port configuration. Initial setup prefers 443, automatically trying 8443–8462 on conflict within the same authorization. Successful setup remembers the selected port and includes it in opened/copied URLs. Other listeners are never stopped; failures retain copyable diagnostics. Ports are not automatically migrated while LeftOpen-launched projects run. Turning off removes managed routes but preserves bindings, certificates and the proxy without stopping project servers; stop LeftOpen-launched projects first.
 
 ---
 

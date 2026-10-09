@@ -33,7 +33,7 @@ public enum AddressSetupPolicy {
 
     public static func installationFailure(_ diagnostic: String) -> String {
         if diagnostic.contains("(-128)") { return "cancelled" }
-        let stages = ["portBusy", "differentOwner", "unsafePath", "unsafeRuntime", "invalidOwner",
+        let stages = ["portBusy", "invalidPort", "differentOwner", "unsafePath", "unsafeRuntime", "invalidOwner",
                       "userDirectoryRepairFailed", "launchdEnableFailed", "serviceInstallFailed",
                       "unsafeService", "serviceCheckFailed", "serviceChanged", "serviceStopFailed", "portCheckFailed",
                       "serviceStopPending", "stopVerificationFailed"]

@@ -17,7 +17,7 @@ struct PortAllowlistInput: View {
             PortTokenLayout(spacing: 6) {
                 ForEach(settings.ignoredPorts, id: \.self) { port in
                     HStack(spacing: 5) {
-                        Text(String(port)).monospacedDigit()
+                        Text(String(port)).font(AppAppearance.portNumber)
                         Button {
                             settings.removeIgnoredPort(port)
                             selected = nil
@@ -27,8 +27,7 @@ struct PortAllowlistInput: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(L("Remove port \(port)", "移除端口 \(port)"))
                     }
-                    .font(.system(size: 13))
-                    .padding(.horizontal, 9).padding(.vertical, 6)
+                    .padding(.horizontal, 6).padding(.vertical, 4)
                     .background(selected == port || highlighted == port
                                 ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.07),
                                 in: RoundedRectangle(cornerRadius: 6))
@@ -36,21 +35,20 @@ struct PortAllowlistInput: View {
                 PortDraftField(text: $draft, focused: $focused,
                                placeholder: L("Add ports…", "输入端口…"),
                                commit: commit, backspace: backspace)
-                    .frame(width: 112, height: 28)
+                    .frame(width: 100, height: 24)
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(AppAppearance.fill, in: RoundedRectangle(cornerRadius: 8))
+            .padding(2)
+            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
             .overlay(RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(invalid ? Color.red : focused ? Color.accentColor.opacity(0.6) : .clear, lineWidth: 1))
             .contentShape(Rectangle())
             .onTapGesture { focused = true }
-            Text(invalid
-                 ? L("Use port numbers from 1 to 65535.", "请输入 1 到 65535 的端口号。")
-                 : L("Return or comma to add. You can paste several ports.", "回车或逗号添加，也可粘贴多个端口。"))
+            if invalid {
+                Text(L("Use port numbers from 1 to 65535.", "请输入 1 到 65535 的端口号。"))
                 .font(AppAppearance.secondary)
-                .foregroundStyle(invalid ? Color.red : Color.secondary)
+                .foregroundStyle(Color.red)
                 .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .onChange(of: draft) {
             invalid = false
@@ -147,7 +145,7 @@ private struct PortDraftField: NSViewRepresentable {
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 13)
         field.delegate = context.coordinator
-        field.setAccessibilityLabel(L("Add ports to allowlist", "添加白名单端口"))
+        field.setAccessibilityLabel(L("Add hidden ports", "添加隐藏端口"))
         return field
     }
 
