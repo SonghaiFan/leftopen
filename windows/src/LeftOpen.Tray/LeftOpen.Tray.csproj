@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\LeftOpen.Core\LeftOpen.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>LeftOpenApp</AssemblyName>
+    <RootNamespace>LeftOpen.Tray</RootNamespace>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.1.0</Version>
+    <!-- Generated from the original repo artwork by Scripts\make-icon.ps1 -->
+    <ApplicationIcon>Assets\leftopen.ico</ApplicationIcon>
+  </PropertyGroup>
+
+</Project>

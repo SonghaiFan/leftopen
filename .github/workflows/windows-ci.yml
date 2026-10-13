@@ -1,0 +1,60 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main, windows-port]
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows-ci.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # required by the release step on windows-v* tags
+
+jobs:
+  test-and-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build (Release)
+        run: dotnet build windows/LeftOpen.sln -c Release
+
+      - name: Unit tests
+        run: dotnet test windows/LeftOpen.sln -c Release --no-build
+
+      # Regression probe for the console-close safety boundary: proves the
+      # Ctrl+C / Ctrl+Break broadcast scope and that production refuses them.
+      - name: Console-safety probe
+        run: dotnet run --project windows/tests/LeftOpen.ConsoleSafety.Probe -c Release
+
+      # The release layout the maintainer asked for: unzip and run, no .NET install.
+      - name: Package self-contained zip
+        run: powershell -File windows/Scripts/publish.ps1 -Shared -OutputDir windows/release
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LeftOpen-windows-x64
+          path: windows/release/LeftOpen-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach to release (windows-v* tags only)
+        if: startsWith(github.ref, 'refs/tags/windows-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: windows/release/LeftOpen-windows-x64.zip
+          body: |
+            Self-contained Windows build — unzip and run, no .NET installation required.
+
+            - `LeftOpenApp.exe` — tray app (door icon in the notification area)
+            - `leftopen.exe` — CLI (`leftopen [port] / open / close / --json`)
