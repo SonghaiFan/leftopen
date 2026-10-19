@@ -274,7 +274,7 @@ public enum Scanner {
             processTable = parseProcessTable(try CommandRunner.output("/bin/ps", ["-axo", "pid=,ppid=,etime=,rss=,comm="]))
         } catch {
             processTable = [:]
-            limitations.append(L("The process table was unavailable; parent evidence is incomplete.", "无法读取进程表，父进程信息不完整。"))
+            limitations.append(L("The process table was unavailable; parent and automation browser evidence is incomplete.", "无法读取进程表，父进程和自动化浏览器信息不完整。"))
         }
 
         var projects: [String: ProjectMarker] = [:]
@@ -318,7 +318,11 @@ public enum Scanner {
             activity.editorPreview = preview
             return activity
         }
-        return ScanSnapshot(activities: activities, limitations: limitations)
+        let automation = AutomationBrowserScanner.scan(processTable: processTable)
+        if automation.incomplete {
+            limitations.append(L("Some Chrome processes could not be verified; they are not offered for cleanup.", "部分 Chrome 进程无法核实，不提供清理操作。"))
+        }
+        return ScanSnapshot(activities: activities, limitations: limitations, automationBrowsers: automation.browsers)
     }
 
     /// launchd jobs whose PID is one of the listeners or their direct parents (a service may run a

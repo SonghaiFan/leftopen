@@ -140,8 +140,10 @@ public struct Activity: Sendable, Equatable, Identifiable {
 public struct ScanSnapshot: Sendable {
     public let activities: [Activity]
     public let limitations: [String]
+    public let automationBrowsers: [AutomationBrowser]
 
-    public init(activities: [Activity], limitations: [String]) {
+    public init(activities: [Activity], limitations: [String], automationBrowsers: [AutomationBrowser] = []) {
+        self.automationBrowsers = automationBrowsers
         self.activities = activities
         self.limitations = limitations
     }

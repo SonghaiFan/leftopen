@@ -50,6 +50,11 @@ enum PanelSnapshot {
                 model.selectedActivityID = "snapshot-vanished"
             }
 
+            if ProcessInfo.processInfo.environment["LEFTOPEN_SNAPSHOT_PAGE"] == "automation-review",
+               let browser = model.snapshot.automationBrowsers.first {
+                await model.previewClose(browser)
+            }
+
             // ImageRenderer only draws pure SwiftUI (AppKit-backed controls become placeholders),
             // so host the panel in an invisible window and let AppKit rasterise it at 2x.
             let content = Group {
