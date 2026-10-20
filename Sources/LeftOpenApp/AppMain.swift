@@ -96,7 +96,7 @@ final class MenuModel: ObservableObject {
             activities: snapshot.activities.filter {
                 !closingActivityIDs.contains($0.id) && !ignored.contains($0.listener.port)
             },
-            limitations: snapshot.limitations
+            limitations: snapshot.limitations, automationBrowsers: snapshot.automationBrowsers
         )
     }
 
@@ -112,7 +112,7 @@ final class MenuModel: ObservableObject {
             safetyProtectionEnabled: AppSettings.shared.safetyProtectionEnabled
         ).map(\.listener.port)).count
     }
-    var hasOpenDoors: Bool { closablePortCount > 0 }
+    var hasOpenDoors: Bool { closablePortCount > 0 || !snapshot.automationBrowsers.isEmpty }
 
     init() {
         _ = FixedAddressManager.shared
@@ -196,9 +196,7 @@ final class MenuModel: ObservableObject {
                 snapshot = try await Task.detached(priority: .utility) { try Scanner.scan() }.value
                 lastRefresh = Date()
                 if let offer = forceCloseOffer {
-                    if !snapshot.activities.contains(where: {
-                        $0.process.pid == offer.plan.pid && $0.listener.port == offer.plan.port
-                    }) {
+                    if !offer.plan.isPresent(in: snapshot) {
                         forceCloseOffer = nil
                         notice = nil
                     }
@@ -238,6 +236,21 @@ final class MenuModel: ObservableObject {
             }.value
         } catch {
             post(Notice(kind: .warning, text: L("Close unavailable: \(error.localizedDescription)", "无法关闭：\(error.localizedDescription)")))
+        }
+    }
+
+    func previewClose(_ browser: AutomationBrowser) async {
+        guard !isPreparingClose && !isClosing else { return }
+        isPreparingClose = true
+        defer { isPreparingClose = false }
+        notice = nil
+        do {
+            pendingPlan = try await Task.detached(priority: .utility) {
+                try CloseService.prepare(browser: browser)
+            }.value
+            forceCloseOffer = nil
+        } catch {
+            post(Notice(kind: .warning, text: error.localizedDescription))
         }
     }
 
@@ -289,13 +302,17 @@ final class MenuModel: ObservableObject {
             selectedActivityID = nil
             let outcome: String
             let kind: NoticeKind
-            if result.portFree {
-                outcome = L("Port \(plan.port) is free.", "端口 \(plan.port) 已释放。")
+            if let exited = result.targetExited {
+                outcome = exited ? L("Automation Chrome closed.", "自动化 Chrome 已关闭。")
+                    : L("Chrome is still running. Force Close is available for two minutes; unsaved work may be lost.", "Chrome 仍在运行，两分钟内可选择强制关闭，可能丢失未保存的数据。")
+                kind = exited ? .success : .forceClose
+            } else if result.portFree {
+                outcome = L("Port \(plan.port.map(String.init) ?? "—") is free.", "端口 \(plan.port.map(String.init) ?? "—") 已释放。")
                 kind = .success
             } else if result.targetStoppedListening {
                 let holders = result.remainingPIDs.map(String.init).joined(separator: ", ")
-                outcome = L("PID \(plan.pid) stopped listening; port \(plan.port) is now held by \(holders).",
-                            "PID \(plan.pid) 已停止监听，但端口 \(plan.port) 现在被 \(holders) 占用。")
+                outcome = L("PID \(plan.pid) stopped listening; port \(plan.port.map(String.init) ?? "—") is now held by \(holders).",
+                            "PID \(plan.pid) 已停止监听，但端口 \(plan.port.map(String.init) ?? "—") 现在被 \(holders) 占用。")
                 kind = .warning
             } else {
                 outcome = L("PID \(plan.pid) is still listening. Close it again within two minutes to force close; unsaved work may be lost.",
@@ -303,8 +320,8 @@ final class MenuModel: ObservableObject {
                 kind = .forceClose
             }
             await refresh()
-            if plan.safetyProtectionEnabled == AppSettings.shared.safetyProtectionEnabled,
-               snapshot.activities.contains(where: { $0.process.pid == plan.pid && $0.listener.port == plan.port }) {
+            if (plan.browser != nil || plan.safetyProtectionEnabled == AppSettings.shared.safetyProtectionEnabled),
+               plan.isPresent(in: snapshot) {
                 forceCloseOffer = result.forceCloseOffer
                 if let offer = forceCloseOffer {
                     Task { [weak self] in
@@ -344,8 +361,12 @@ final class MenuModel: ObservableObject {
                 try CloseService.forceClose(offer)
             }.value
             await refresh()
-            if result.portFree {
-                post(Notice(kind: .success, text: L("Port \(offer.plan.port) is free.", "端口 \(offer.plan.port) 已释放。")))
+            if let exited = result.targetExited {
+                post(Notice(kind: exited ? .success : .warning, text: exited
+                    ? L("Automation Chrome closed.", "自动化 Chrome 已关闭。")
+                    : L("Force close sent, but Chrome is still running.", "已发送强制关闭信号，但 Chrome 仍在运行。")))
+            } else if result.portFree {
+                post(Notice(kind: .success, text: L("Port \(offer.plan.port.map(String.init) ?? "—") is free.", "端口 \(offer.plan.port.map(String.init) ?? "—") 已释放。")))
             } else {
                 post(Notice(kind: .warning, text: result.targetStoppedListening
                     ? L("The process stopped listening, but another process holds the port.", "该进程已停止监听，但端口仍被其他进程占用。")
@@ -474,8 +495,8 @@ struct LeftOpenApp: App {
             return L("LeftOpen scan failed; \(model.portCount) last known listening ports", "LeftOpen 扫描失败；上次已知 \(model.portCount) 个监听端口")
         }
         if model.hasOpenDoors {
-            return L("LeftOpen, \(model.closablePortCount) open dev ports, \(model.portCount) total ports",
-                     "LeftOpen，\(model.closablePortCount) 个可关闭端口，共 \(model.portCount) 个端口")
+            return L("LeftOpen, \(model.closablePortCount) closable ports, \(model.snapshot.automationBrowsers.count) automation browsers, \(model.portCount) total ports",
+                     "LeftOpen，\(model.closablePortCount) 个可关闭端口，\(model.snapshot.automationBrowsers.count) 个自动化浏览器，共 \(model.portCount) 个端口")
         }
         return L("LeftOpen, all doors closed, 0 dev servers running", "LeftOpen，门都关好了，没有可关闭的端口")
     }
