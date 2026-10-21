@@ -124,9 +124,11 @@ public struct Activity: Sendable, Equatable, Identifiable {
     public let projectMarker: ProjectMarker?
     public let applicationBundle: ApplicationBundle?
     public let scope: ListenerScope
-    public let inference: OwnerInference
+    public var inference: OwnerInference
     public var editorPreview: EditorPreview? = nil
     public var launchdJob: LaunchdJob? = nil
+    /// Set only when a verified local forwarder and TCP bind match one immutable container identity.
+    public var container: ContainerInfo? = nil
 
     public var id: String { "\(listener.port):\(listener.pid)" }
 

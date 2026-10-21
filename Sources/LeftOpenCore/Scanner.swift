@@ -26,7 +26,8 @@ enum CommandRunner {
 
     static func output(_ executable: String, _ arguments: [String], allowEmptyLsof: Bool = false,
                        timeout: TimeInterval = defaultTimeout,
-                       maxOutputBytes: Int = defaultMaxOutputBytes) throws -> String {
+                       maxOutputBytes: Int = defaultMaxOutputBytes,
+                       environment: [String: String]? = nil) throws -> String {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             throw ScanError.missingTool(executable)
         }
@@ -34,6 +35,7 @@ enum CommandRunner {
         let stdout = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if let environment { process.environment = environment }
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
         let exited = DispatchSemaphore(value: 0)
@@ -318,7 +320,33 @@ public enum Scanner {
             activity.editorPreview = preview
             return activity
         }
-        return ScanSnapshot(activities: activities, limitations: limitations)
+        return ScanSnapshot(activities: resolveContainers(activities), limitations: limitations)
+    }
+
+    /// Resolve only verified local forwarders, then repeat the endpoint/address guard on assignment.
+    /// Native processes sharing a numeric port must never inherit container metadata.
+    static func resolveContainers(_ activities: [Activity],
+                                  lookup: ([Activity]) -> [String: ContainerInfo] = ContainerResolver.containers,
+                                  endpoint: (Activity) -> ContainerEndpoint? = { ContainerResolver.verifiedEndpoint(for: $0) }) -> [Activity] {
+        let forwarded = activities.filter { endpoint($0) != nil }
+        let containers = lookup(forwarded)
+        guard !containers.isEmpty else { return activities }
+        return activities.map { activity in
+            guard let verified = endpoint(activity), let container = containers[activity.id],
+                  container.endpoint == verified,
+                  ContainerResolver.match(activity.listener, in: [container])?.identity == container.identity
+            else { return activity }
+            let detail = container.composeProject.map { project in
+                    L("compose project \(project)", "compose 项目 \(project)")
+                } ?? container.image
+            let inference = OwnerInference(label: container.displayName, category: .service, confidence: "high",
+                reason: L("Port \(activity.listener.port) is forwarded to container \(container.name) (\(detail)).",
+                          "端口 \(activity.listener.port) 转发到容器 \(container.name)（\(detail)）。"))
+            var updated = activity
+            updated.inference = inference
+            updated.container = container
+            return updated
+        }
     }
 
     /// launchd jobs whose PID is one of the listeners or their direct parents (a service may run a

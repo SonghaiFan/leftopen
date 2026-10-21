@@ -55,7 +55,7 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 
 - **Knows whose port it is.** Walks up from the process's working directory to `.git`, `package.json`, `pyproject.toml`, `Cargo.toml` or `go.mod`, or resolves the owning `.app`. Global npm packages, `python -m` modules and standalone services (Redis, Postgres, Ollama…) are named too, so you rarely see a bare `node` or `python`.
 - **Real icons, nothing bundled.** Uses the `.app` icon when there is one; otherwise the icon the project or package ships itself (Tauri/Electron app icon, the favicon declared in `index.html`, `public/` conventions); otherwise the favicon served by the local server; otherwise a symbol.
-- **Grouped by who started them.** Dev Servers (from a project, terminal, editor or agent), Background Services (launchd: brew services, login items), Apps and System. The group is also how a port is closed for good, and each one says so: SIGTERM for dev servers, `brew services stop …` for services launchd would restart, quitting the app for apps.
+- **Grouped by who started them.** Dev Servers (from a project, terminal, editor or agent), Background Services (launchd: brew services, login items), Containers (forwarded by Docker Desktop, OrbStack or colima; the Engine API resolves the container's name, compose project and mounted directories), Apps and System. The group is also how a port is closed for good, and each one says so: SIGTERM for dev servers, `brew services stop …` for services launchd would restart, one click `docker stop` for containers on their port page, quitting the app for apps.
 - **Closes gently first.** Sends `SIGTERM` and re-checks process identity. If a single-process close still leaves it listening after five seconds, that process is marked and the warning explains that closing it again within two minutes sends `SIGKILL`. The second click or swipe is the deliberate force-close action; existing safety protections and identity checks still apply.
 - **Local vs LAN.** Tells apart ports bound to `127.0.0.1` from ones on `0.0.0.0` or a LAN address.
 - **Hidden ports.** Hide selected ports from the list, search, menu bar count, and change sounds in **Settings → Ports → Hidden Ports**, or choose **Hide Port** from its context menu. Enter ports with Return or commas, or paste several at once. Each saved port becomes a tag; click its × to show that port again. Services keep running.
@@ -63,6 +63,8 @@ Get `LeftOpen-release.zip` from [GitHub Releases](https://github.com/SonghaiFan/
 - **Quiet by default.** Native SwiftUI `MenuBarExtra`. No Dock icon, no telemetry, and no background service unless you opt into fixed addresses. The only request that leaves this Mac is a daily check of the latest GitHub release, which you can turn off in Settings.
 - **Fixed project addresses.** Give a dev server a stable `https://myapp.localhost` URL that follows it across port changes, powered by bundled [Portless](https://github.com/vercel-labs/portless). See [below](#fixed-project-addresses).
 - **Same engine in the terminal.** The app ships a `leftopen` CLI with identical inference and safety rules.
+
+Container stop actions are limited to verified local runtime endpoints. Ambiguous ownership stays read-only; see [container safety](docs/container-stop-safety.md).
 
 ---
 

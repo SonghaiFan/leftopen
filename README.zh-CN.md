@@ -56,7 +56,7 @@ brew install --cask songhaifan/tap/leftopen
 
 - **知道端口是谁的。** 从进程的工作目录向上找 `.git`、`package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod`，或者解析它所属的 `.app`。全局 npm 包、`python -m` 模块和 Redis / Postgres / Ollama 这类独立服务也按名字识别，很少再看到一个光秃秃的 `node` 或 `python`。
 - **真实图标，不预存。** 有 `.app` 就用它的图标；否则用项目或包自己带的（Tauri / Electron app icon、`index.html` 声明的 favicon、`public/` 约定）；否则向本机服务器抓 favicon；再没有才用符号。
-- **按来历分组。** 开发服务器（从项目、终端、编辑器或 agent 启动）、后台服务（由 launchd 管理：brew services、登录项）、App 和系统。分组即关闭方式，每组都写明：开发服务器发 SIGTERM，launchd 会重启的服务提示 `brew services stop …`，App 的端口需要退出 App。
+- **按来历分组。** 开发服务器（从项目、终端、编辑器或 agent 启动）、后台服务（由 launchd 管理：brew services、登录项）、容器（由 Docker Desktop、OrbStack、colima 转发，通过 Engine API 解析出容器名、compose 项目和挂载目录）、App 和系统。分组即关闭方式，每组都写明：开发服务器发 SIGTERM，launchd 会重启的服务提示 `brew services stop …`，容器可在详情页一键 `docker stop`，App 的端口需要退出 App。
 - **先轻轻关闭。** 发送 `SIGTERM`，关闭前重新核对进程身份。单独关闭一个进程后等待五秒，如果仍在监听，该进程会显示失败提示；警告会说明两分钟内再次点击或右滑关闭将发送 `SIGKILL`。第二次关闭操作就是明确的强制关闭，原有安全保护和身份核验仍然生效。
 - **本机还是局域网。** 区分绑在 `127.0.0.1` 的端口和绑在 `0.0.0.0` / 局域网地址上的端口。
 - **隐藏端口。** 在 **设置 → 端口 → 隐藏端口** 中添加端口，或右键选择 **隐藏端口**，即可从列表、搜索、菜单栏计数和变化提示音中排除。输入端口后按回车或逗号添加，也可一次粘贴多个端口。已保存的端口显示为标签，点击 × 后恢复显示。服务仍继续运行。
@@ -64,6 +64,8 @@ brew install --cask songhaifan/tap/leftopen
 - **默认安静。** 原生 SwiftUI `MenuBarExtra`。无 Dock 图标，无遥测；除非启用固定地址，否则没有后台服务。唯一离开这台 Mac 的网络请求是每天向 GitHub 查询一次最新版本，可在设置中关闭。
 - **固定项目地址。** 为开发服务器分配稳定的 `https://myapp.localhost`，端口变化后自动跟随，由内置的 [Portless](https://github.com/vercel-labs/portless) 提供。详见[下文](#固定项目地址)。
 - **终端里是同一个引擎。** App 附带 `leftopen` 命令行工具，推断和安全规则完全一致。
+
+停止容器仅适用于已验证的本机运行时端点；归属不明确时只展示，不提供停止操作。详见 [容器安全机制](docs/container-stop-safety.md)。
 
 ---
 

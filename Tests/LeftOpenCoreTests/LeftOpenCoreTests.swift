@@ -496,12 +496,84 @@ final class LeftOpenCoreTests: XCTestCase {
         XCTAssertEqual(category(parents: ["some-daemon"]), .other)
     }
 
+    func testContainerRuntimesFormTheirOwnCategory() {
+        func runtimeActivity(path: String, bundleName: String? = nil, parents: [String] = []) -> Activity {
+            let listener = Listener(pid: 42, command: "x", uid: Int32(getuid()), user: nil,
+                port: 8080, addresses: ["127.0.0.1"])
+            let process = ProcessFact(pid: 42, ppid: 500, command: "x", executablePath: path,
+                uid: Int32(getuid()), user: nil, cwd: nil)
+            let chain = parents.enumerated().map { index, name in
+                ProcessFact(pid: Int32(100 + index), ppid: nil, command: name, executablePath: nil,
+                    uid: Int32(getuid()), user: nil, cwd: nil)
+            }
+            let bundle = bundleName.map { ApplicationBundle(name: $0, path: "/Applications/\($0).app", sourcePID: 99, direct: true) }
+            return Activity(listener: listener, process: process, parentChain: chain,
+                projectMarker: nil, applicationBundle: bundle, scope: .local,
+                inference: OwnerInference(label: bundleName ?? "x", category: .application,
+                    confidence: "high", reason: "Fixture."))
+        }
+
+        // Docker Desktop forwards through com.docker.backend inside its app bundle.
+        let backend = runtimeActivity(path: "/Applications/Docker.app/Contents/MacOS/com.docker.backend", bundleName: "Docker")
+        XCTAssertEqual(PortCategory.classify([backend]), .container)
+        XCTAssertTrue(CloseService.protectionReason(for: backend)?.contains("docker ps") == true)
+
+        // OrbStack's forwarders sit inside its bundle.
+        XCTAssertEqual(PortCategory.classify([runtimeActivity(path: "/Applications/OrbStack.app/Contents/MacOS/OrbStack-helper", bundleName: "OrbStack")]), .container)
+
+        // colima / a standalone daemon forward via docker-proxy, a child of the daemon.
+        XCTAssertEqual(PortCategory.classify([runtimeActivity(path: "/Users/me/.colima/_lima/colima/docker-proxy", parents: ["dockerd", "colima"])]), .container)
+
+        // Unverified legacy metadata must not produce an actionable name-only stop command.
+        var resolved = backend
+        resolved.container = ContainerInfo(name: "leftopen-db", image: "postgres:16")
+        XCTAssertTrue(CloseService.protectionReason(for: resolved)?.contains("ownership is not verified") == true)
+
+        // An ordinary app still lands in Apps.
+        XCTAssertEqual(PortCategory.classify([runtimeActivity(path: "/Applications/Editor.app/Contents/MacOS/Editor", bundleName: "Editor")]), .app)
+    }
+
+    func testContainerNamesPreferSomethingReadable() {
+        XCTAssertTrue(ContainerInfo.isGeneratedName("nostalgic_turing"))
+        XCTAssertFalse(ContainerInfo.isGeneratedName("leftopen-db"), "a chosen --name keeps the row")
+        XCTAssertFalse(ContainerInfo.isGeneratedName("leftopen_db_2"), "compose names have three parts")
+        XCTAssertFalse(ContainerInfo.isGeneratedName("LeftOpen"))
+        XCTAssertEqual(ContainerInfo(name: "nostalgic_turing", image: "redis:7-alpine").displayName, "redis")
+        XCTAssertEqual(ContainerInfo(name: "nostalgic_turing", image: "ghcr.io/acme/api:v2").displayName, "api")
+        XCTAssertEqual(ContainerInfo(name: "chosen", image: "redis:7").displayName, "chosen")
+        XCTAssertEqual(ContainerInfo(name: "proj-web-1", image: "nginx",
+                                     composeProject: "proj").displayName, "proj-web-1")
+    }
+
+    /// The Docker daemon chunks `/containers/json`; an undecoded body kills every socket resolve.
+    func testChunkedEngineResponseIsDecoded() throws {
+        let json = #"[{"Names":["/leftopen-db"],"Image":"postgres:16","Ports":[{"PublicPort":5432,"Type":"tcp"}],"Labels":null,"Mounts":[]}]"#
+        let pieces = [json.prefix(30), json.dropFirst(30).prefix(20), json.dropFirst(50)]
+        var raw = Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)
+        for piece in pieces {
+            raw.append(Data(String(piece.count, radix: 16).utf8))
+            raw.append(Data("\r\n".utf8))
+            raw.append(Data(piece.utf8))
+            raw.append(Data("\r\n".utf8))
+        }
+        raw.append(Data("0\r\n\r\n".utf8))
+
+        let body = try XCTUnwrap(UnixSocketHTTP.responseBody(raw))
+        XCTAssertEqual(String(decoding: body, as: UTF8.self), json)
+
+        // A truncated stream has no zero-size terminator and must not parse halfway.
+        let truncated = raw.subdata(in: raw.startIndex..<raw.count - 7)
+        XCTAssertNil(UnixSocketHTTP.responseBody(truncated))
+    }
+
     func testCoreTextFollowsTheSelectedLanguage() {
         defer { Localization.current = .english }
         XCTAssertEqual(PortCategory.devServer.title, "Dev Servers")
+        XCTAssertEqual(PortCategory.container.title, "Containers")
 
         Localization.current = .chinese
         XCTAssertEqual(PortCategory.devServer.title, "开发服务器")
+        XCTAssertEqual(PortCategory.container.title, "容器")
         var service = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/syncthing")
         service.launchdJob = LaunchdJob(label: "homebrew.mxcl.syncthing", pid: 42, keepAlive: true)
         XCTAssertEqual(CloseService.protectionReason(for: service),
