@@ -490,6 +490,11 @@ public enum Scanner {
     }
 
     private static func inferOwner(process: ProcessFact, project: ProjectMarker?, bundle: ApplicationBundle?) -> OwnerInference {
+        if let agent = CodingAgent.name(of: process), let path = process.executablePath {
+            return OwnerInference(label: agent, category: .application, confidence: "high",
+                reason: L("\(path) is the \(agent) program; its port belongs to a running session.",
+                          "\(path) 是 \(agent) 程序本身，这个端口属于一个正在运行的会话。"))
+        }
         if let project {
             return OwnerInference(label: project.name, category: .project, confidence: "high",
                 reason: L("CWD is within a project root containing \(project.source) at \(project.markerPath).",

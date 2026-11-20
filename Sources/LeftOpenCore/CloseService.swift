@@ -122,6 +122,10 @@ public enum CloseService {
             guard !protected.contains(where: { path.hasPrefix($0) }) else {
                 throw CloseError(L("PID \(target.pid) uses an operating-system executable; refusing to close it.", "PID \(target.pid) 是系统程序，拒绝关闭。"))
             }
+            if let agent = CodingAgent.name(of: target) {
+                throw CloseError(L("PID \(target.pid) is a running \(agent) session. Closing it would end that session; exit it from its own terminal instead.",
+                                   "PID \(target.pid) 是正在运行的 \(agent) 会话，关闭它会结束这个会话。请在它自己的终端里退出。"))
+            }
             if activity.editorPreview != nil, let bundle = activity.applicationBundle {
                 throw CloseError(L("Stop this preview in \(bundle.name). It shares the editor’s process, so closing it here could disrupt other editor features.",
                                    "请在 \(bundle.name) 中停止预览。它与编辑器共用进程，在此关闭会影响编辑器的其他功能。"))

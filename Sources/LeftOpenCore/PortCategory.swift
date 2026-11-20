@@ -55,6 +55,7 @@ public enum PortCategory: String, CaseIterable, Sendable {
         guard let activity = activities.first else { return .other }
         if isSystem(activity) { return .system }
         if activity.launchdJob != nil { return .background }
+        if CodingAgent.name(of: activity.process) != nil { return .app }
         if activities.allSatisfy({ $0.editorPreview != nil }) { return .devServer }
         if activity.applicationBundle?.direct == true { return .app }
         if activity.projectMarker != nil || startedFromShell(activity) || isOrphan(activity) { return .devServer }
