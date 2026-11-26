@@ -2,20 +2,57 @@ import Darwin
 import Foundation
 
 public struct ClosePlan: Sendable, Identifiable {
-    public let port: Int
+    public let port: Int?
     public let pid: Int32
     public let uid: Int32
     public let executablePath: String
     public let startTime: String
-    public let activity: Activity
+    public let activity: Activity?
+    public let browser: AutomationBrowser?
+    public let process: ProcessFact
     public let otherPorts: [Int]
     public let peerPIDs: [Int32]
     public let safetyProtectionEnabled: Bool
 
-    public var id: String { "\(port):\(pid)" }
+    init(port: Int?, pid: Int32, uid: Int32, executablePath: String, startTime: String,
+         activity: Activity, otherPorts: [Int], peerPIDs: [Int32], safetyProtectionEnabled: Bool) {
+        self.port = port
+        self.pid = pid
+        self.uid = uid
+        self.executablePath = executablePath
+        self.startTime = startTime
+        self.activity = activity
+        self.process = activity.process
+        self.browser = nil
+        self.otherPorts = otherPorts
+        self.peerPIDs = peerPIDs
+        self.safetyProtectionEnabled = safetyProtectionEnabled
+    }
+
+    init(browser: AutomationBrowser, uid: Int32, executablePath: String) {
+        self.port = nil
+        self.pid = browser.process.pid
+        self.uid = uid
+        self.executablePath = executablePath
+        self.startTime = browser.startTime
+        self.activity = nil
+        self.process = browser.process
+        self.browser = browser
+        self.otherPorts = []
+        self.peerPIDs = []
+        self.safetyProtectionEnabled = true
+    }
+
+    public var id: String { browser?.id ?? "\(port.map(String.init) ?? "unknown"):\(pid)" }
+
+    public func isPresent(in snapshot: ScanSnapshot) -> Bool {
+        if let browser { return snapshot.automationBrowsers.contains { $0.id == browser.id } }
+        return snapshot.activities.contains { $0.process.pid == pid && $0.listener.port == port }
+    }
 }
 
 public struct CloseResult: Sendable {
+    public let targetExited: Bool?
     public let targetStoppedListening: Bool
     public let portFree: Bool
     public let remainingPIDs: [Int32]
@@ -69,6 +106,28 @@ public enum CloseService {
         } catch {
             return error.localizedDescription
         }
+    }
+
+    public static func prepare(browser: AutomationBrowser) throws -> ClosePlan {
+        guard let fresh = try AutomationBrowserScanner.read(browser.process.pid), fresh == browser else {
+            throw CloseError(L("Browser identity changed; refresh and review again.", "浏览器身份已变化，请刷新后重新确认。"))
+        }
+        return try makeBrowserPlan(fresh)
+    }
+
+    static func makeBrowserPlan(_ browser: AutomationBrowser) throws -> ClosePlan {
+        guard getuid() != 0, browser.process.uid == Int32(getuid()), browser.process.pid > 1,
+              browser.process.pid != getpid(), let path = browser.process.executablePath else {
+            throw CloseError(L("Browser process is protected or its identity is incomplete.", "浏览器进程受保护或身份信息不完整。"))
+        }
+        return ClosePlan(browser: browser, uid: Int32(getuid()), executablePath: path)
+    }
+
+    static func verifyBrowser(plan: ClosePlan, fresh: AutomationBrowser?) throws {
+        guard let expected = plan.browser, let fresh, fresh == expected else {
+            throw CloseError(L("Browser identity or automation profile changed; nothing was signalled.", "浏览器身份或自动化配置已变化，未发送信号。"))
+        }
+        _ = try makeBrowserPlan(fresh)
     }
 
     public static func prepare(port: Int, pid: Int32? = nil,
@@ -138,13 +197,14 @@ public enum CloseService {
     }
 
     public static func verify(plan: ClosePlan, activities: [Activity], freshStartTime: String?) throws {
-        let matches = activities.filter { $0.listener.port == plan.port }
+        guard let port = plan.port, plan.browser == nil else { throw CloseError("Expected a listener close plan.") }
+        let matches = activities.filter { $0.listener.port == port }
         guard let activity = matches.first(where: { $0.process.pid == plan.pid }) else {
-            throw CloseError(L("PID \(plan.pid) no longer listens on port \(plan.port); nothing was signalled.", "PID \(plan.pid) 已不再监听端口 \(plan.port)，未发送任何信号。"))
+            throw CloseError(L("PID \(plan.pid) no longer listens on port \(port); nothing was signalled.", "PID \(plan.pid) 已不再监听端口 \(port)，未发送任何信号。"))
         }
         let freshPeers = Set(matches.map(\.process.pid)).subtracting([plan.pid])
         guard freshPeers.isSubset(of: Set(plan.peerPIDs)) else {
-            throw CloseError(L("Port \(plan.port) acquired a new owning PID; nothing was signalled.", "端口 \(plan.port) 出现了新的所属进程，未发送任何信号。"))
+            throw CloseError(L("Port \(port) acquired a new owning PID; nothing was signalled.", "端口 \(port) 出现了新的所属进程，未发送任何信号。"))
         }
         guard freshStartTime == plan.startTime,
               activity.process.uid == plan.uid,
@@ -152,7 +212,7 @@ public enum CloseService {
             throw CloseError(L("PID \(plan.pid) changed identity since the preview; nothing was signalled.", "PID \(plan.pid) 在确认后身份已变化，未发送任何信号。"))
         }
         let ports = Set(activities.filter { $0.process.pid == plan.pid }.map(\.listener.port))
-        guard ports.isSubset(of: Set(plan.otherPorts + [plan.port])) else {
+        guard ports.isSubset(of: Set(plan.otherPorts + [port])) else {
             throw CloseError(L("This process opened additional ports. Try a gentle close again to review them.",
                                "此进程新增了监听端口，请重新尝试轻轻关闭并查看影响范围。"))
         }
@@ -170,13 +230,16 @@ public enum CloseService {
 
     static func verifyForceClose(_ offer: ForceCloseOffer, activities: [Activity],
                                  freshStartTime: String?, now: Date = Date()) throws {
+        try verifyOfferAge(offer, now: now)
+        let plan = offer.plan
+        try verify(plan: plan, activities: activities, freshStartTime: freshStartTime)
+    }
+
+    static func verifyOfferAge(_ offer: ForceCloseOffer, now: Date = Date()) throws {
         guard now.timeIntervalSince(offer.issuedAt) >= 0,
               now.timeIntervalSince(offer.issuedAt) < 120 else {
             throw CloseError(L("Force close expired. Try a gentle close again.", "强制关闭已过期，请先重新尝试轻轻关闭。"))
         }
-        let plan = offer.plan
-        try verify(plan: plan, activities: activities, freshStartTime: freshStartTime)
-
     }
 
     // Injectable system boundaries let tests verify signal ordering without killing real processes.
@@ -186,6 +249,9 @@ public enum CloseService {
                         send: (Int32, Int32) -> Int32 = { kill($0, $1) },
                         listeners: () throws -> [Listener] = Scanner.scanListeners,
                         wait: () -> Void = { Thread.sleep(forTimeInterval: 0.5) }) throws -> CloseResult {
+        if plan.browser != nil {
+            return try performBrowser(plan, signal: signal, offer: offer, send: send, wait: wait)
+        }
         let fresh = try scan()
         if signal == SIGKILL {
             guard let offer, offer.plan.id == plan.id else {
@@ -211,10 +277,39 @@ public enum CloseService {
             }
             if !latest.contains(where: { $0.pid == plan.pid }) { break }
         }
-        return CloseResult(targetStoppedListening: !latest.contains(where: { $0.pid == plan.pid }),
+        return CloseResult(targetExited: nil, targetStoppedListening: !latest.contains(where: { $0.pid == plan.pid }),
             portFree: latest.isEmpty, remainingPIDs: Array(Set(latest.map(\.pid))).sorted(),
             forceCloseOffer: signal == SIGTERM && latest.contains(where: { $0.pid == plan.pid })
                 ? ForceCloseOffer(plan: plan) : nil)
+    }
+
+    static func performBrowser(_ plan: ClosePlan, signal: Int32, offer: ForceCloseOffer? = nil,
+                               read: (Int32) throws -> AutomationBrowser? = AutomationBrowserScanner.read,
+                               running: (AutomationBrowser) throws -> Bool = AutomationBrowserScanner.isRunning,
+                               send: (Int32, Int32) -> Int32 = { kill($0, $1) },
+                               wait: () -> Void = { Thread.sleep(forTimeInterval: 0.5) }) throws -> CloseResult {
+        guard let browser = plan.browser else { throw CloseError("Expected a browser close plan.") }
+        if signal == SIGKILL {
+            guard let offer, offer.plan.id == plan.id else {
+                throw CloseError(L("Try a gentle close first.", "请先尝试轻轻关闭。"))
+            }
+            try verifyOfferAge(offer)
+        }
+        try verifyBrowser(plan: plan, fresh: read(plan.pid))
+        guard send(plan.pid, signal) == 0 else {
+            throw CloseError(L("Could not send the close signal to PID \(plan.pid).", "无法向 PID \(plan.pid) 发送关闭信号。"))
+        }
+        var alive = true
+        for _ in 0..<10 {
+            wait()
+            do { alive = try running(browser) }
+            catch {
+                throw CloseError(L("Close signal sent, but browser exit could not be verified.", "已发送关闭信号，但无法确认浏览器是否退出。"), signalSent: true)
+            }
+            if !alive { break }
+        }
+        return CloseResult(targetExited: !alive, targetStoppedListening: false, portFree: false, remainingPIDs: [],
+                           forceCloseOffer: signal == SIGTERM && alive ? ForceCloseOffer(plan: plan) : nil)
     }
 
     public static func prepareBatch(activities: [Activity],

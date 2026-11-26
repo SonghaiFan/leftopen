@@ -86,6 +86,42 @@ struct MenuPanel: View {
         }
     }
 
+    private var filteredBrowsers: [AutomationBrowser] {
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.snapshot.automationBrowsers.filter {
+            search.isEmpty || "Chrome automation 自动化 \($0.process.pid)".localizedCaseInsensitiveContains(search)
+        }
+    }
+
+    @ViewBuilder private var automationBrowsers: some View {
+        if !filteredBrowsers.isEmpty {
+            sectionHeader(L("Automation browsers", "自动化浏览器")) { EmptyView() }
+            ForEach(filteredBrowsers) { browser in
+                HStack(spacing: 10) {
+                    Image(systemName: "globe").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L("Automation Chrome", "自动化 Chrome")).font(AppAppearance.body)
+                        Text("PID \(browser.process.pid) · " + browser.startedAt.formatted(date: .abbreviated, time: .shortened))
+                            .font(AppAppearance.secondary).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    if let offer = model.forceCloseOffer, offer.plan.browser?.id == browser.id {
+                        Button(L("Force Close", "强制关闭")) { Task { await model.confirmForceClose(offer) } }
+                            .foregroundStyle(Color(nsColor: .systemRed))
+                            .disabled(model.isClosing || model.isPreparingClose)
+                    } else {
+                        Button(L("Close…", "关闭…")) { Task { await model.previewClose(browser) } }
+                            .disabled(model.isClosing || model.isPreparingClose)
+                    }
+                }
+                .padding(.horizontal, AppAppearance.contentInset).padding(.vertical, 8)
+            }
+            Text(L("Dedicated temporary sessions. Task activity is unknown; review before closing.", "使用独立临时配置的会话。无法确认任务是否仍在使用，关闭前请核对。"))
+                .font(AppAppearance.secondary).foregroundStyle(.secondary)
+                .padding(.horizontal, AppAppearance.contentInset).padding(.bottom, 10)
+        }
+    }
+
     private var filteredActivities: [Activity] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         // Use the same visible ports for search, list and counts.
@@ -354,7 +390,7 @@ struct MenuPanel: View {
     private var statusLine: some View {
         HStack(spacing: 4) {
             if model.hasOpenDoors {
-                Text(L("\(model.closablePortCount) open", "\(model.closablePortCount) 个可关闭")).fontWeight(.medium)
+                Text(L("\(model.closablePortCount + model.snapshot.automationBrowsers.count) open", "\(model.closablePortCount + model.snapshot.automationBrowsers.count) 个可关闭")).fontWeight(.medium)
             } else {
                 Text(L("All doors closed", "门都关好了"))
             }
@@ -442,16 +478,17 @@ struct MenuPanel: View {
     private var listPage: some View {
         VStack(spacing: 0) {
             searchField
-            if model.isRefreshing && model.snapshot.activities.isEmpty {
+            if model.isRefreshing && model.snapshot.activities.isEmpty && model.snapshot.automationBrowsers.isEmpty {
                 ProgressView(L("Scanning this Mac…", "正在扫描这台 Mac…"))
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredActivities.isEmpty && (!settings.showProjectDock || dockProjects.isEmpty) {
+            } else if filteredActivities.isEmpty && filteredBrowsers.isEmpty && (!settings.showProjectDock || dockProjects.isEmpty) {
                 emptyView
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         savedProjects
+                        automationBrowsers
                         ForEach(sections, id: \.category) { section in
                             let expanded = isExpanded(section.category, section.groups)
                             categoryHeader(section.category, count: section.groups.count, expanded: expanded) {
@@ -970,7 +1007,7 @@ struct MenuPanel: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(L("Close port \(String(plan.port))?", "关闭端口 \(String(plan.port))？"))
+                    Text(plan.browser != nil ? L("Close this automation Chrome?", "关闭这个自动化 Chrome？") : L("Close port \(plan.port.map(String.init) ?? "—")?", "关闭端口 \(plan.port.map(String.init) ?? "—")？"))
                         .font(.title3.weight(.semibold))
                     Text(L("LeftOpen sends SIGTERM to PID \(String(plan.pid)) only. Nothing is force-quit, and child processes are not signalled.",
                             "LeftOpen 只向 PID \(String(plan.pid)) 发送 SIGTERM，不会强制退出，也不会向子进程发送信号。"))
@@ -978,9 +1015,13 @@ struct MenuPanel: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Divider()
-                    infoRow(L("Process", "进程"), plan.activity.process.command)
+                    infoRow(L("Process", "进程"), plan.process.command)
                     infoRow(L("Executable", "可执行文件"), compactPath(plan.executablePath))
-                    infoRow(L("Started", "启动时间"), plan.startTime)
+                    infoRow(L("Started", "启动时间"), plan.browser.map { $0.startedAt.formatted(date: .abbreviated, time: .standard) } ?? plan.startTime)
+                    if let browser = plan.browser {
+                        infoRow(L("Temporary profile", "临时配置"), URL(fileURLWithPath: browser.profilePath).lastPathComponent)
+                        caution(L("This closes all tabs in this dedicated automation session. Its task may still be active. Other Chrome sessions are not targeted.", "将关闭此独立自动化会话中的所有标签页，相关任务可能仍在运行。不会向其他 Chrome 会话发送信号。"))
+                    }
                     if !plan.otherPorts.isEmpty {
                         caution(L("It also listens on \(plan.otherPorts.map(String.init).joined(separator: ", ")); those ports will close too.",
                                    "它还在监听 \(plan.otherPorts.map(String.init).joined(separator: ", "))，这些端口也会一起关闭。"))
@@ -991,7 +1032,7 @@ struct MenuPanel: View {
                 }
                 .padding(14)
             }
-            confirmBar(plan.otherPorts.isEmpty ? L("Close Port", "关闭端口") : L("Close Ports", "关闭这些端口")) {
+            confirmBar(plan.browser != nil ? L("Close Browser", "关闭浏览器") : plan.otherPorts.isEmpty ? L("Close Port", "关闭端口") : L("Close Ports", "关闭这些端口")) {
                 Task { await model.confirmClose() }
             }
         }
@@ -1013,13 +1054,15 @@ struct MenuPanel: View {
                     .padding(.top, 14)
                     .padding(.bottom, 8)
                     ForEach(plans) { plan in
-                        PortRow(
-                            port: plan.port,
-                            icon: plan.activity,
-                            title: plan.activity.inference.label,
-                            subtitle: "\(plan.activity.process.command) · PID \(String(plan.pid))",
-                            trailing: plan.activity.process.compactUptime
-                        )
+                        if let port = plan.port, let activity = plan.activity {
+                            PortRow(
+                                port: port,
+                                icon: activity,
+                                title: activity.inference.label,
+                                subtitle: "\(plan.process.command) · PID \(String(plan.pid))",
+                                trailing: activity.process.compactUptime
+                            )
+                        }
                     }
                 }
             }

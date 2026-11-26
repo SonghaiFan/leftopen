@@ -138,7 +138,7 @@ func runClose(port: Int, targetPID: Int32?, dryRun: Bool, autoConfirm: Bool, act
     do {
         let plan = try CloseService.prepare(port: port, pid: activity.process.pid)
         print("\n\(bold("CLOSE PLAN"))")
-        print("Target:     \(plan.activity.process.command) (PID \(plan.pid))")
+        print("Target:     \(plan.process.command) (PID \(plan.pid))")
         print("Executable: \(compactPath(plan.executablePath))")
         print("Started:    \(plan.startTime)")
         if !plan.otherPorts.isEmpty {
@@ -253,8 +253,8 @@ func runBatchCloseProjects(dryRun: Bool, autoConfirm: Bool, activities: [Activit
         }
         print("\n\(bold("BATCH CLOSE PLAN")) (\(plans.count) project server\(plans.count == 1 ? "" : "s"))")
         for plan in plans {
-            let ramStr = plan.activity.process.memoryUsage.map { " (\($0))" } ?? ""
-            print("  • Port \(plan.port): \(plan.activity.inference.label) — PID \(plan.pid)\(ramStr)")
+            let ramStr = plan.process.memoryUsage.map { " (\($0))" } ?? ""
+            print("  • Port \(plan.port.map(String.init) ?? "—"): \(plan.activity?.inference.label ?? plan.process.command) — PID \(plan.pid)\(ramStr)")
         }
         if dryRun {
             print(dim("\nDry run mode: no signal sent.\n"))
@@ -279,7 +279,7 @@ func runBatchCloseProjects(dryRun: Bool, autoConfirm: Bool, activities: [Activit
         } else {
             print("\(yellow("PARTIAL")) Closed \(result.successfulPlans.count) of \(result.totalCount) servers.")
             for failure in result.failedPlans {
-                print("  \(red("FAILED")) PID \(failure.plan.pid) (Port \(failure.plan.port)): \(failure.error)")
+                print("  \(red("FAILED")) PID \(failure.plan.pid) (Port \(failure.plan.port.map(String.init) ?? "—")): \(failure.error)")
             }
         }
     } catch {
