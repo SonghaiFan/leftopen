@@ -373,6 +373,27 @@ final class LeftOpenCoreTests: XCTestCase {
             fixtureActivity(pid: 42, path: nil)))
     }
 
+    func testRunningClaudeCodeSessionIsAnAppAndCannotBeClosed() {
+        // The claude program listens on a localhost port of its own, and its working directory is
+        // usually a project, so it used to be listed as that project's dev server.
+        let path = "/Users/test/.local/share/claude/versions/2.1.322"
+        let base = fixtureActivity(pid: 42, path: path, port: 60019)
+        let session = Activity(listener: base.listener, process: base.process, parentChain: [],
+            projectMarker: ProjectMarker(name: "idea-board", root: "/private/tmp/project",
+                source: "package.json", markerPath: "/private/tmp/project/package.json"),
+            applicationBundle: nil, scope: .local,
+            inference: OwnerInference(label: "idea-board", category: .project, confidence: "high", reason: "CWD."))
+        XCTAssertEqual(PortCategory.classify([session]), .app)
+        XCTAssertNotNil(CloseService.protectionReason(for: session))
+        XCTAssertTrue(ScanSnapshot(activities: [session], limitations: []).closableProjectActivities.isEmpty)
+        XCTAssertNil(CloseService.protectionReason(for: session, safetyProtectionEnabled: false))
+
+        // A server the session started is a separate process and stays a closable dev server.
+        let server = fixtureActivity(pid: 43, path: "/opt/homebrew/bin/node", port: 5173)
+        XCTAssertNil(CloseService.protectionReason(for: server))
+        XCTAssertNotEqual(PortCategory.classify([server]), .app)
+    }
+
     func testSafetyProtectionCanBeDisabledWithoutSkippingIdentityChecks() throws {
         let uid = Int32(getuid())
         var keepAlive = fixtureActivity(pid: 42, path: "/opt/homebrew/bin/node")
