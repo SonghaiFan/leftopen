@@ -1,27 +1,18 @@
-<div align="center">
-  <img src="assets/logo.svg" alt="LeftOpen Logo" width="48" height="80" />
-  <h1>LeftOpen</h1>
-  <p><strong>Native macOS Menu Bar Port Manager &amp; CLI</strong></p>
-  <p><em>See what your tools left running on localhost, identify projects, and gently close them.</em></p>
-
-  <p>
-    <a href="https://leftopen.songhai.site/"><img src="https://img.shields.io/badge/website-songhai.site-211811?style=flat-square" alt="Website" /></a>
-    <a href="https://github.com/SonghaiFan/leftopen/releases/latest"><img src="https://img.shields.io/github/v/release/SonghaiFan/leftopen?color=black&style=flat-square" alt="Release" /></a>
-    <a href="https://github.com/SonghaiFan/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-cask-211811?style=flat-square" alt="Homebrew Cask" /></a>
-    <img src="https://img.shields.io/badge/macOS-14.0%2B-555555?style=flat-square" alt="macOS 14+" />
-    <img src="https://img.shields.io/badge/Apple%20Notarized-Accepted-211811?style=flat-square" alt="Apple Notarized" />
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555555?style=flat-square" alt="License: MIT" /></a>
-  </p>
-
-  <p><strong>English</strong> · <a href="README.zh-CN.md">中文</a></p>
-
-  <br />
+<h1 align="center">
   <picture>
-    <source srcset="assets/preview-dark.png" media="(prefers-color-scheme: dark)">
-    <img src="assets/preview.png" alt="LeftOpen menu bar panel: closable ports first, apps and system services folded away" width="375" />
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/lockup-dark.svg" />
+    <img src=".github/brand/lockup-light.svg" width="360" alt="LeftOpen" />
   </picture>
-  <br /><br />
-</div>
+</h1>
+
+<p align="center"><b>See what your tools left running on localhost, and close what you no longer need.</b></p>
+
+<p align="center"><a href="https://leftopen.songhai.site/">Website</a> · <a href="https://github.com/SonghaiFan/leftopen/releases/latest">Download</a> · <a href="#installation">Install</a> · <a href="#cli">CLI</a> · <a href="README.zh-CN.md">中文</a></p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/preview-dark.png" />
+  <img src="assets/preview.png" width="375" alt="LeftOpen menu bar panel showing ports, processes and projects." />
+</picture>
 
 > When I have several coding agents working in parallel, dev servers and test runners keep starting up on different ports. By the end of the day there are always a few still running.
 >
@@ -177,3 +168,24 @@ For complete removal, use **LeftOpen → Settings → About → Uninstall LeftOp
 Direct `brew uninstall` only removes the app and CLI; services, certificates and
 settings may remain. If already removed, reinstall the app and use its uninstaller.
 See [complete uninstall](docs/uninstall.md).
+
+<br />
+
+<p align="center">
+  <a href="https://github.com/SonghaiFan/leftopen"><img src=".github/brand/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/openclaw-visualiser"><img src=".github/brand/series/her-os.svg" width="32" height="32" alt="her-os" title="her-os" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/roc-ui"><img src=".github/brand/series/roc.svg" width="32" height="32" alt="ROC" title="ROC" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/token-flow"><img src=".github/brand/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/franklin-board"><img src=".github/brand/series/aboard.svg" width="32" height="32" alt="Aboard" title="Aboard" /></a>&nbsp;
+  <img src=".github/brand/series/structured-text.svg" width="32" height="32" alt="Structured Text" title="Structured Text · local package" />&nbsp;
+  <a href="https://github.com/SonghaiFan/tasty-text"><img src=".github/brand/series/tasty-text.svg" width="32" height="32" alt="Tasty Text" title="Tasty Text" /></a>
+</p>
+
+<p align="center"><sub>LeftOpen is part of the Franklin tools series.</sub></p>
+
+<p align="right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/frank-signature-dark.svg" />
+    <img src=".github/brand/frank-signature-light.svg" width="72" alt="Frank" />
+  </picture>
+</p>

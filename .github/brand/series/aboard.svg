@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img"><title>Aboard</title><rect x="2" y="2" width="252" height="252" rx="48" fill="#ffffff" stroke="#deded8" stroke-width="3"/><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="aboard-title aboard-desc" x="30" y="30" width="196" height="196">
+  <title id="aboard-title">Aboard</title>
+  <desc id="aboard-desc">A minimal white enamel board with a soft lowercase a in relief and a small dark marker tray.</desc>
+  <defs>
+    <linearGradient id="surface" x1="180" y1="48" x2="310" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fafbfc"/><stop offset=".5" stop-color="#f0f2f4"/><stop offset="1" stop-color="#d8dde1"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="48" x2="0" y2="466" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/><stop offset=".6" stop-color="#dce1e5"/><stop offset="1" stop-color="#9da5ab"/>
+    </linearGradient>
+    <linearGradient id="relief" x1="65" y1="44" x2="180" y2="216" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b8c2cb"/><stop offset=".45" stop-color="#c5ced6"/><stop offset="1" stop-color="#d3dbe2"/>
+    </linearGradient>
+    <linearGradient id="bevel" x1="65" y1="44" x2="180" y2="216" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity=".95"/><stop offset=".5" stop-color="#ffffff" stop-opacity=".25"/><stop offset="1" stop-color="#ffffff" stop-opacity=".8"/>
+    </linearGradient>
+    <linearGradient id="tray" x1="218" y1="442" x2="294" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#302319"/><stop offset=".5" stop-color="#3b2a1b"/><stop offset="1" stop-color="#21180f"/>
+    </linearGradient>
+    <filter id="soft-relief" x="-15%" y="-15%" width="140%" height="145%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="2" dy="2.5" stdDeviation="2.2" flood-color="#737f8b" flood-opacity="0.22"/>
+      <feDropShadow dx="-1" dy="-1" stdDeviation="1.1" flood-color="#ffffff" flood-opacity=".8"/>
+    </filter>
+  </defs>
+  <path d="M 203.51 42.00 L 308.49 42.00 c 57.2378 0 85.8567 0 107.3151 12.0173 a 94.2500 94.2500 0 0 1 36.1802 36.1802 c 12.0173 21.4583 12.0173 50.0772 12.0173 107.3151 L 464.00 197.51 L 464.00 302.49 c 0 57.2378 0 85.8567 -12.0173 107.3151 a 94.2500 94.2500 0 0 1 -36.1802 36.1802 c -21.4583 12.0173 -50.0772 12.0173 -107.3151 12.0173 L 308.49 458.00 L 203.51 458.00 c -57.2378 0 -85.8567 0 -107.3151 -12.0173 a 94.2500 94.2500 0 0 1 -36.1802 -36.1802 c -12.0173 -21.4583 -12.0173 -50.0772 -12.0173 -107.3151 L 48.00 302.49 L 48.00 197.51 c 0 -57.2378 0 -85.8567 12.0173 -107.3151 a 94.2500 94.2500 0 0 1 36.1802 -36.1802 c 21.4583 -12.0173 50.0772 -12.0173 107.3151 -12.0173 Z" transform="translate(0 8)" fill="url(#rim)"/>
+  <path d="M 203.51 42.00 L 308.49 42.00 c 57.2378 0 85.8567 0 107.3151 12.0173 a 94.2500 94.2500 0 0 1 36.1802 36.1802 c 12.0173 21.4583 12.0173 50.0772 12.0173 107.3151 L 464.00 197.51 L 464.00 302.49 c 0 57.2378 0 85.8567 -12.0173 107.3151 a 94.2500 94.2500 0 0 1 -36.1802 36.1802 c -21.4583 12.0173 -50.0772 12.0173 -107.3151 12.0173 L 308.49 458.00 L 203.51 458.00 c -57.2378 0 -85.8567 0 -107.3151 -12.0173 a 94.2500 94.2500 0 0 1 -36.1802 -36.1802 c -12.0173 -21.4583 -12.0173 -50.0772 -12.0173 -107.3151 L 48.00 302.49 L 48.00 197.51 c 0 -57.2378 0 -85.8567 12.0173 -107.3151 a 94.2500 94.2500 0 0 1 36.1802 -36.1802 c 21.4583 -12.0173 50.0772 -12.0173 107.3151 -12.0173 Z" transform="translate(0 6)" fill="url(#surface)"/>
+  <path d="M112 44H200V166Q200 184 224 184V216H207Q179 216 165 200Q145 216 112 216C66 216 36 184 36 132C36 80 66 44 112 44Z M114 80C88 80 76 98 76 132C76 164 88 180 114 180C144 180 164 162 164 132V80Z" transform="matrix(1.23 0 0 1.2 93.5 95.5)" fill-rule="evenodd" fill="url(#relief)" stroke="url(#bevel)" stroke-width="1.8" filter="url(#soft-relief)"/>
+  <path d="M219 442H293Q294 442 294 443V464H218V443Q218 442 219 442Z" fill="url(#tray)"/>
+  <path d="M219 443H293" fill="none" stroke="#604732" stroke-opacity=".5" stroke-width=".7"/>
+</svg></svg>
