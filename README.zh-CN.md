@@ -1,28 +1,30 @@
-<div align="center">
-  <img src="assets/logo.svg" alt="LeftOpen Logo" width="48" height="80" />
-  <h1>LeftOpen</h1>
-  <p><strong>原生 macOS 菜单栏端口管理工具与 CLI</strong></p>
-  <p>把那些虚掩着的门，轻轻关上。</p>
-  <p><em>See what your tools left running on localhost, identify projects, and gently close them.</em></p>
+<h1 align="center">
+  <a href="https://leftopen.songhai.site">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/brand/lockup-dark.svg" />
+      <img src=".github/brand/lockup-light.svg" width="300" alt="LeftOpen" />
+    </picture>
+  </a>
+</h1>
 
-  <p>
-    <a href="https://leftopen.songhai.site/"><img src="https://img.shields.io/badge/website-songhai.site-211811?style=flat-square" alt="Website" /></a>
-    <a href="https://github.com/SonghaiFan/leftopen/releases/latest"><img src="https://img.shields.io/github/v/release/SonghaiFan/leftopen?color=black&style=flat-square" alt="Release" /></a>
-    <a href="https://github.com/SonghaiFan/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-cask-211811?style=flat-square" alt="Homebrew Cask" /></a>
-    <img src="https://img.shields.io/badge/macOS-14.0%2B-555555?style=flat-square" alt="macOS 14+" />
-    <img src="https://img.shields.io/badge/Apple%20Notarized-Accepted-211811?style=flat-square" alt="Apple Notarized" />
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555555?style=flat-square" alt="License: MIT" /></a>
-  </p>
+<p align="center"><b>把虚掩着的门，轻轻关上。</b></p>
 
-  <p><a href="README.md">English</a> · <strong>中文</strong></p>
+<p align="center">
+  <a href="https://leftopen.songhai.site">网站</a> ·
+  <a href="https://github.com/SonghaiFan/leftopen/releases/latest">下载</a> ·
+  <a href="#安装">安装</a> ·
+  <a href="#命令行">命令行</a> ·
+  <a href="README.md">English</a>
+</p>
 
-  <br />
+<p align="center">
   <picture>
     <source srcset="assets/preview-zh-dark.png" media="(prefers-color-scheme: dark)">
     <img src="assets/preview-zh.png" alt="LeftOpen 菜单栏面板：可关闭的端口排在前面，系统服务与 app 折叠收起" width="375" />
   </picture>
-  <br /><br />
-</div>
+</p>
+
+LeftOpen 是一个原生 macOS 菜单栏应用和命令行工具：看清 localhost 上正在监听的端口、它们属于哪个进程和项目，再把不需要的轻轻关掉。支持 macOS 14 及以上，经 Apple 公证，MIT 许可。
 
 > 当我并行让多个 agent 写代码时，开发服务器和测试服务会不断启动，监听不同的端口。忙完一天，电脑里往往留下不少还开着的服务。
 >
@@ -176,3 +178,20 @@ python3 Scripts/dev-app.py clean
 直接运行 `brew uninstall` 只移除应用和 CLI，可能留下后台服务、证书和配置。
 如果已删除应用，请重新安装后使用应用内卸载功能。
 详见[完整卸载说明](docs/uninstall.md)。
+
+<br />
+
+<p align="center">
+  <a href="https://leftopen.songhai.site"><img src=".github/brand/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/token-flow"><img src=".github/brand/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
+  <a href="https://songhaifan.github.io/roc-ui/"><img src=".github/brand/series/roc-ui.svg" width="32" height="32" alt="ROC" title="ROC" /></a>
+</p>
+
+<p align="center"><sub>LeftOpen 是 Franklin 系列的一部分。</sub></p>
+
+<p align="right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/frank-signature-dark.svg" />
+    <img src=".github/brand/frank-signature-light.svg" width="72" alt="Frank" />
+  </picture>
+</p>
