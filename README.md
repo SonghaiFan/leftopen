@@ -171,17 +171,23 @@ See [complete uninstall](docs/uninstall.md).
 
 <br />
 
+<!-- series-footer:start -->
+
 <p align="center">
-  <a href="https://github.com/SonghaiFan/leftopen"><img src=".github/brand/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
-  <a href="https://github.com/SonghaiFan/openclaw-visualiser"><img src=".github/brand/series/her-os.svg" width="32" height="32" alt="her-os" title="her-os" /></a>&nbsp;
-  <a href="https://github.com/SonghaiFan/roc-ui"><img src=".github/brand/series/roc.svg" width="32" height="32" alt="ROC" title="ROC" /></a>&nbsp;
-  <a href="https://github.com/SonghaiFan/token-flow"><img src=".github/brand/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
-  <a href="https://github.com/SonghaiFan/franklin-board"><img src=".github/brand/series/aboard.svg" width="32" height="32" alt="Aboard" title="Aboard" /></a>&nbsp;
-  <img src=".github/brand/series/structured-text.svg" width="32" height="32" alt="Structured Text" title="Structured Text · local package" />&nbsp;
-  <a href="https://github.com/SonghaiFan/tasty-text"><img src=".github/brand/series/tasty-text.svg" width="32" height="32" alt="Tasty Text" title="Tasty Text" /></a>
+<a href="https://github.com/SonghaiFan/leftopen"><img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/her-os"><img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/her-os.svg" width="32" height="32" alt="her-os" title="her-os" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/roc-ui"><img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/roc.svg" width="32" height="32" alt="ROC" title="ROC" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/token-flow"><img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
+  <img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/aboard.svg" width="32" height="32" alt="Aboard" title="Aboard" />&nbsp;
+  <img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/structured-text.svg" width="32" height="32" alt="Structured Text" title="Structured Text · local package" />&nbsp;
+  <img src="https://raw.githubusercontent.com/SonghaiFan/SonghaiFan/main/assets/series/tasty-text.svg" width="32" height="32" alt="Tasty Text" title="Tasty Text" />
 </p>
 
-<p align="center"><sub>LeftOpen is part of the Franklin tools series.</sub></p>
+<p align="center"><a href="https://github.com/SonghaiFan/rea">REA</a> · <a href="https://github.com/SonghaiFan/franklin-comments">Franklin Comments</a> · <a href="https://github.com/SonghaiFan/obsidian-blog-publisher">Obsidian Blog Publisher</a></p>
+
+<p align="center"><sub>Franklin series · Made by <a href="https://github.com/SonghaiFan">Songhai Fan</a></sub></p>
+
+<!-- series-footer:end -->
 
 <p align="right">
   <picture>
